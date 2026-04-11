@@ -47,7 +47,7 @@ const DEFAULTS = {
   index: "",
   titleFormat: "{{ .command }}@{{ .hostname }}",
   reconnect: false,
-  reconnectTime: 10,
+  reconnectTime: -1,
   maxConnection: -1,
   once: false,
   timeout: -1,
@@ -106,10 +106,11 @@ Options:
   --title-format <value>        Title format 
     (default: {{ .command }}@{{ .hostname }} )
     
-  --reconnect                   Enable reconnection
+  --reconnect                   Enable reconnecting to the original TTY
+    Useful when the connection is temporarily down
     (default: disabled)
-  --reconnect-time <value>      Time to reconnect (seconds)
-    (default: 10)
+  --reconnect-time <value>      Time to preserve original TTY (seconds)
+    (default: -1 (forever) )
     
   --max-connection <value>      Maximum concurrent clients
     (default: -1 (no limit) )
@@ -352,6 +353,18 @@ function randomPathSegment(length) {
     output += alphabet[bytes[i] % alphabet.length];
   }
   return output;
+}
+
+function generateReconnectToken() {
+  return crypto.randomBytes(24).toString("base64url");
+}
+
+function formatReconnectTokenForLog(token) {
+  const value = String(token || "");
+  if (!value) {
+    return "-";
+  }
+  return value.slice(0, 8);
 }
 
 function parseInteger(name, value) {
@@ -606,7 +619,8 @@ function parseInitMessage(raw) {
 
   return {
     Arguments: typeof parsed.Arguments === "string" ? parsed.Arguments : "",
-    AuthToken: typeof parsed.AuthToken === "string" ? parsed.AuthToken : ""
+    AuthToken: typeof parsed.AuthToken === "string" ? parsed.AuthToken : "",
+    ReconnectToken: typeof parsed.ReconnectToken === "string" ? parsed.ReconnectToken : ""
   };
 }
 
@@ -1429,7 +1443,7 @@ function createPtyBackend(options) {
 class PtySession {
   constructor(options) {
     this.options = options;
-    this.ws = options.ws;
+    this.ws = null;
     this.log = options.log;
     this.permitWrite = options.permitWrite;
     this.columns = options.width || 0;
@@ -1437,6 +1451,9 @@ class PtySession {
     this.bufferSize = 1024;
     this.encoding = "null";
     this.closed = false;
+    this.backendExited = false;
+    this.reconnectTimer = null;
+    this.reconnectToken = options.reconnect ? generateReconnectToken() : "";
     this.backend = createPtyBackend(options);
     this.cursorTracker = new CursorStateTracker();
     this.cursorTracker.setDimensions(this.columns || 80);
@@ -1456,24 +1473,6 @@ class PtySession {
   }
 
   start() {
-    const title = renderTemplate(
-      this.options.titleFormat,
-      buildTitleVariables(
-        this.options.command,
-        this.options.argv,
-        this.options.hostname,
-        this.options.remoteAddr,
-        this.slaveVars
-      )
-    );
-
-    this.send(MSG_SET_WINDOW_TITLE, title);
-    this.send(MSG_SET_BUFFER_SIZE, JSON.stringify(this.bufferSize));
-
-    if (this.options.reconnect) {
-      this.send(MSG_SET_RECONNECT, JSON.stringify(this.options.reconnectTime));
-    }
-
     this.backend.onData((raw) => {
       if (this.closed) {
         return;
@@ -1519,10 +1518,83 @@ class PtySession {
     });
 
     this.backend.onExit(() => {
-      this.close();
+      this.backendExited = true;
+      this.terminate(1000, "process exited", { skipBackendClose: true });
     });
 
-    this.startWebSocketHandlers();
+    this.attachWebSocket(this.options.ws, this.options.remoteAddr || "");
+  }
+
+  attachWebSocket(ws, remoteAddr = "") {
+    if (!ws || this.closed) {
+      return false;
+    }
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    this.ws = ws;
+    this.options.remoteAddr = remoteAddr;
+    this.sendSessionMetadata();
+    this.startWebSocketHandlers(ws);
+    return true;
+  }
+
+  canResume(token) {
+    return Boolean(
+      token &&
+      this.options.reconnect &&
+      !this.closed &&
+      !this.backendExited &&
+      token === this.reconnectToken
+    );
+  }
+
+  sendSessionMetadata() {
+    const title = renderTemplate(
+      this.options.titleFormat,
+      buildTitleVariables(
+        this.options.command,
+        this.options.argv,
+        this.options.hostname,
+        this.options.remoteAddr,
+        this.slaveVars
+      )
+    );
+
+    this.send(MSG_SET_WINDOW_TITLE, title);
+    this.send(MSG_SET_BUFFER_SIZE, JSON.stringify(this.bufferSize));
+
+    if (this.options.reconnect) {
+      this.send(MSG_SET_RECONNECT, JSON.stringify({
+        time: this.options.reconnectTime,
+        token: this.reconnectToken
+      }));
+    }
+  }
+
+  armReconnectTimeout() {
+    if (!this.options.reconnect || this.closed || this.backendExited) {
+      this.terminate();
+      return;
+    }
+
+    if (this.options.reconnectTime < 0) {
+      return;
+    }
+
+    const timeoutMs = this.options.reconnectTime * 1000;
+    if (timeoutMs === 0) {
+      this.terminate(1001, "reconnect timeout");
+      return;
+    }
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.terminate(1001, "reconnect timeout");
+    }, timeoutMs);
   }
 
   handleWindowsBridgeControl(control) {
@@ -1900,26 +1972,33 @@ class PtySession {
     return "";
   }
 
-  startWebSocketHandlers() {
-    this.ws.on("message", (message, isBinary) => {
-      if (this.closed || isBinary) {
+  startWebSocketHandlers(ws) {
+    ws.on("message", (message, isBinary) => {
+      if (this.closed || ws !== this.ws || isBinary) {
         return;
       }
       try {
         this.handleClientMessage(message.toString("utf8"));
       } catch (error) {
         this.log(`WS session error: ${error.message}`);
-        this.close(1011, error.message);
+        this.terminate(1011, error.message);
       }
     });
 
-    this.ws.on("close", () => {
-      this.close();
-    });
+    const handleSocketGone = () => {
+      if (ws !== this.ws || this.closed) {
+        return;
+      }
+      this.ws = null;
+      if (this.options.reconnect && !this.backendExited) {
+        this.armReconnectTimeout();
+        return;
+      }
+      this.terminate();
+    };
 
-    this.ws.on("error", () => {
-      this.close();
-    });
+    ws.once("close", handleSocketGone);
+    ws.once("error", handleSocketGone);
   }
 
   handleClientMessage(data) {
@@ -1995,24 +2074,47 @@ class PtySession {
   }
 
   send(type, payload) {
-    if (this.ws.readyState === WebSocket.OPEN) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(type + payload);
     }
   }
 
-  close(code, reason) {
+  terminate(code, reason, { skipBackendClose = false } = {}) {
     if (this.closed) {
       return;
     }
     this.closed = true;
 
-    this.backend.close();
-
-    try {
-      this.ws.close(code || 1000, reason);
-    } catch (error) {
-      // ignore
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
+
+    if (this.options.reconnectRegistry && this.reconnectToken) {
+      this.options.reconnectRegistry.delete(this.reconnectToken);
+    }
+
+    if (!skipBackendClose && !this.backendExited) {
+      this.backend.close();
+    }
+
+    const ws = this.ws;
+    this.ws = null;
+    if (ws) {
+      try {
+        ws.close(code || 1000, reason);
+      } catch (error) {
+        // ignore
+      }
+    }
+
+    if (typeof this.options.onTerminate === "function") {
+      this.options.onTerminate(this);
+    }
+  }
+
+  close(code, reason) {
+    this.terminate(code, reason);
   }
 }
 
@@ -2027,6 +2129,7 @@ function createServerRuntime(command, argv, options) {
   const indexTemplate = readTextFile(options.index ? expandHome(options.index) : DEFAULT_INDEX);
   const manifestTemplate = readTextFile(DEFAULT_MANIFEST);
   const activeSessions = new Set();
+  const reconnectRegistry = new Map();
   let acceptedOnce = false;
   let shuttingDown = false;
 
@@ -2192,7 +2295,7 @@ function createServerRuntime(command, argv, options) {
       }
     }
 
-    if (options.once && acceptedOnce) {
+    if (options.once && acceptedOnce && !options.reconnect) {
       socket.destroy();
       return;
     }
@@ -2206,17 +2309,13 @@ function createServerRuntime(command, argv, options) {
       return;
     }
 
-    if (options.once) {
-      acceptedOnce = true;
-    }
-
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req);
     });
   });
 
   wss.on("connection", (ws, req) => {
-    log(`New client connected: ${req.socket.remoteAddress}`);
+    log(`\nNew client connected: ${req.socket.remoteAddress}`);
     log(`  Connections count: ${counter.count()}`)
 
     if(options.maxConnection>0)
@@ -2230,9 +2329,6 @@ function createServerRuntime(command, argv, options) {
         return;
       }
       finalized = true;
-      if (session) {
-        activeSessions.delete(session);
-      }
       const num = counter.done();
       log(`Connection closed by ${reason}: ${req.socket.remoteAddress}`)
 
@@ -2241,10 +2337,8 @@ function createServerRuntime(command, argv, options) {
       if(options.maxConnection>0)
         log(`  Limit: ${options.maxConnection}`);
         
-      if (options.once) {
-        log("Shutting down: --once")
-        shutdown(false);
-        setTimeout(()=>process.exit(0),2000);
+      if (shuttingDown && num === 0) {
+        process.exit(0);
       }
     };
 
@@ -2270,6 +2364,21 @@ function createServerRuntime(command, argv, options) {
         return;
       }
 
+      if (options.reconnect && init.ReconnectToken) {
+        const existing = reconnectRegistry.get(init.ReconnectToken);
+        if (existing && existing.canResume(init.ReconnectToken)) {
+          log(`  Reconnect token: ${formatReconnectTokenForLog(init.ReconnectToken)} (resume)`);
+          session = existing;
+          session.attachWebSocket(ws, req.socket.remoteAddress || "");
+          return;
+        }
+      }
+
+      if (options.once && acceptedOnce) {
+        ws.close(1008, "server already accepted a client");
+        return;
+      }
+
       let clientArgs = [];
       if (options.permitArguments && init.Arguments) {
         const url = new URL(init.Arguments, "http://localhost");
@@ -2291,16 +2400,29 @@ function createServerRuntime(command, argv, options) {
           permitWrite: options.permitWrite,
           reconnect: options.reconnect,
           reconnectTime: options.reconnectTime,
+          reconnectRegistry,
           width: options.width,
           height: options.height,
           closeSignal: options.closeSignal,
-          closeTimeout: options.closeTimeout
+          closeTimeout: options.closeTimeout,
+          onTerminate: (endedSession) => {
+            activeSessions.delete(endedSession);
+            if (options.once) {
+              shutdown(false);
+              setTimeout(()=>process.exit(0),3000)
+            }
+          }
         });
       } catch (error) {
         ws.close(1011, `failed to create backend: ${error.message}`);
         return;
       }
+      acceptedOnce = acceptedOnce || options.once;
       activeSessions.add(session);
+      if (session.reconnectToken) {
+        reconnectRegistry.set(session.reconnectToken, session);
+      }
+      log(`  Reconnect token: ${formatReconnectTokenForLog(session.reconnectToken)}`);
       session.start();
     });
   });

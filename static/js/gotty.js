@@ -12177,24 +12177,76 @@
           reconnect;
           bufSize;
           disconnected;
+          reconnectToken;
+          reconnectDeadline;
+          reconnectAttempts;
           constructor(e, t, i, r) {
-            ((this.term = e),
-              (this.connectionFactory = t),
-              (this.args = i),
-              (this.authToken = r),
-              (this.reconnect = -1),
-              (this.bufSize = 1024),
-              (this.disconnected = !1));
+            this.term = e;
+            this.connectionFactory = t;
+            this.args = i;
+            this.authToken = r;
+            this.reconnect = -1;
+            this.bufSize = 1024;
+            this.disconnected = !1;
+            this.reconnectToken = "";
+            this.reconnectDeadline = 0;
+            this.reconnectAttempts = 0;
           }
           open() {
-            let e,
-              i,
-              r = this.connectionFactory.create();
+            let e;
+            let i;
+            let r = this.connectionFactory.create();
             this.connection = r;
+            if ("undefined" != typeof window) {
+              window.__gottyConnection = r;
+            }
+            const o = () => {
+              clearTimeout(i);
+              this.reconnectAttempts += 1;
+              r = this.connectionFactory.create();
+              this.connection = r;
+              if ("undefined" != typeof window) {
+                window.__gottyConnection = r;
+              }
+              this.term.reset();
+              s();
+            };
+            const n = () => {
+              if (this.reconnect < 0) {
+                i = setTimeout(() => {
+                  o();
+                }, 6e4);
+                return;
+              }
+              const totalMs = Math.max(0, 1e3 * this.reconnect);
+              if (totalMs <= 0) {
+                return;
+              }
+              if (this.reconnectDeadline <= 0) {
+                this.reconnectDeadline = Date.now() + totalMs;
+                this.reconnectAttempts = 0;
+              }
+              const remainingMs = this.reconnectDeadline - Date.now();
+              if (remainingMs <= 0) {
+                return;
+              }
+              const remainingAttempts = Math.max(1, 3 - this.reconnectAttempts);
+              const retryDelay = Math.max(
+                250,
+                Math.floor(remainingMs / remainingAttempts),
+              );
+              i = setTimeout(() => {
+                o();
+              }, retryDelay);
+            };
             const s = () => {
               (r.onOpen(() => {
+                clearTimeout(i);
                 this.disconnected = !1;
+                this.reconnectDeadline = 0;
+                this.reconnectAttempts = 0;
                 this.term.setDisconnected(!1);
+                this.term.setReconnectAction(null);
                 const t = this.term.info();
                 (this.initializeConnection(this.args, this.authToken),
                   this.term.onResize((e, t) => {
@@ -12228,8 +12280,17 @@
                       break;
                     case t.msgSetReconnect:
                       const r = JSON.parse(i);
-                      (console.log("Enabling reconnect: " + r + " seconds"),
-                        (this.reconnect = r));
+                      "number" == typeof r
+                        ? (console.log("Enabling reconnect: " + r + " seconds"),
+                          (this.reconnect = r))
+                        : r &&
+                          "object" == typeof r &&
+                          (console.log(
+                            "Enabling reconnect: " + r.time + " seconds",
+                          ),
+                          (this.reconnect = Number(r.time) || -1),
+                          (this.reconnectToken =
+                            "string" == typeof r.token ? r.token : ""));
                       break;
                     case t.msgSetBufferSize:
                       const s = JSON.parse(i);
@@ -12237,30 +12298,41 @@
                   }
                 }),
                 r.onClose(() => {
-                  (clearInterval(e),
-                    (this.disconnected = !0),
-                    this.term.setDisconnected(!0),
-                    this.term.deactivate(),
-                    this.term.showMessage("Connection Closed", 0),
-                    this.reconnect > 0 &&
-                      (i = setTimeout(() => {
-                        ((r = this.connectionFactory.create()),
-                          this.term.reset(),
-                          s());
-                      }, 1e3 * this.reconnect)));
+                  clearInterval(e);
+                  this.disconnected = !0;
+                  this.term.setDisconnected(!0);
+                  this.term.deactivate();
+                  this.term.setReconnectAction(() => {
+                    o();
+                  });
+                  this.term.showReconnectMessage();
+                  if (this.reconnect > 0) {
+                    n();
+                  }
                 }),
                 r.open());
             };
             return (
               s(),
               () => {
-                (clearTimeout(i), r.close());
+                clearTimeout(i);
+                if (
+                  "undefined" != typeof window &&
+                  window.__gottyConnection === r
+                ) {
+                  window.__gottyConnection = null;
+                }
+                r.close();
               }
             );
           }
           initializeConnection(e, t) {
             this.connection.send(
-              JSON.stringify({ Arguments: e, AuthToken: t }),
+              JSON.stringify({
+                Arguments: e,
+                AuthToken: t,
+                ReconnectToken: this.reconnectToken,
+              }),
             );
           }
           sendInput(e) {
@@ -12381,6 +12453,7 @@
           zmodemAddon;
           toServer;
           encoder;
+          reconnectAction;
           constructor(e) {
             ((this.elem = e),
               (this.term = new r.Terminal()),
@@ -12397,6 +12470,7 @@
               (this.message.className = "xterm-overlay"),
               (this.messageTimeout = 2e3),
               (this.disconnected = !1),
+              (this.reconnectAction = null),
               (this.resizeListener = () => {
                 (this.fitAddOn.fit(),
                   this.term.scrollToBottom(),
@@ -12425,8 +12499,30 @@
           setDisconnected(e) {
             this.disconnected = !!e;
           }
+          setReconnectAction(e) {
+            this.reconnectAction = "function" == typeof e ? e : null;
+          }
           showMessage(e, t) {
             ((this.message.innerHTML = e), this.showMessageElem(t));
+          }
+          showReconnectMessage() {
+            this.message.replaceChildren();
+            const e = this.message.ownerDocument.createElement("div");
+            e.textContent = "Connection Closed";
+            this.message.appendChild(e);
+            if (this.reconnectAction) {
+              const e = this.message.ownerDocument.createElement("button");
+              e.type = "button";
+              e.className = "xterm-overlay-button";
+              e.textContent = "Reconnect";
+              e.addEventListener("click", () => {
+                if (this.reconnectAction) {
+                  this.reconnectAction();
+                }
+              });
+              this.message.appendChild(e);
+            }
+            this.showMessageElem(0);
           }
           showMessageElem(e) {
             (this.elem.appendChild(this.message),
@@ -12460,22 +12556,33 @@
             return this.toServer(e);
           }
           onInput(e) {
-            ((this.encoder = new TextEncoder()),
-              (this.toServer = e),
-              void 0 === this.onDataHandler &&
-                (this.onDataHandler = this.term.onData((e) => {
-                  this.toServer(this.encoder.encode(e));
-                })));
+            this.encoder = new TextEncoder();
+            this.toServer = e;
+            if (void 0 !== this.onDataHandler) {
+              this.onDataHandler.dispose();
+            }
+            this.onDataHandler = this.term.onData((e) => {
+              this.toServer(this.encoder.encode(e));
+            });
           }
           onResize(e) {
+            if (void 0 !== this.onResizeHandler) {
+              this.onResizeHandler.dispose();
+            }
             this.onResizeHandler = this.term.onResize(() => {
               e(this.term.cols, this.term.rows);
             });
           }
           deactivate() {
-            (this.onDataHandler.dispose(),
-              this.onResizeHandler.dispose(),
-              this.term.blur());
+            if (void 0 !== this.onDataHandler) {
+              this.onDataHandler.dispose();
+              this.onDataHandler = void 0;
+            }
+            if (void 0 !== this.onResizeHandler) {
+              this.onResizeHandler.dispose();
+              this.onResizeHandler = void 0;
+            }
+            this.term.blur();
           }
           reset() {
             (this.removeMessage(), this.term.clear());
@@ -30810,6 +30917,9 @@
     if (null !== s) {
       var n;
       n = new r.GoTTYXterm(s);
+      if ("undefined" != typeof window) {
+        window.__gottyTerminal = n;
+      }
       const i = "https:" == window.location.protocol,
         o = "" === gotty_ws_query_args ? "" : "?" + gotty_ws_query_args,
         a =
@@ -30820,9 +30930,14 @@
           o,
         l = window.location.search,
         c = new e.ConnectionFactory(a, t.protocols),
-        d = new t.WebTTY(n, c, l, gotty_auth_token).open();
+        d = new t.WebTTY(n, c, l, gotty_auth_token);
+      if ("undefined" != typeof window) {
+        window.__gottyXterm = s.__gottyXterm || null;
+        window.__gottyWebTTY = d;
+      }
+      const h = d.open();
       window.addEventListener("unload", () => {
-        (d(), n.close());
+        (h(), n.close());
       });
     }
   })();
