@@ -74,16 +74,21 @@ function printUsage() {
 Usage: bun gotty.js [options] <command> [<arguments...>]
 
 Options:
-  --address, -a <value>          IP address to listen (default: 0.0.0.0)
-  --port, -p <value>             Port number to listen (default: 8080)
-  --path, -m <value>             Base path (default: /)
+  --address, -a <value>          IP address to listen 
+    (default: 0.0.0.0)
+  --port, -p <value>             Port number to listen 
+    (default: 8080)
+  --path, -m <value>             Base path 
+    (default: /)
   --permit-write, -w             Permit clients to write to the TTY
   --credential, -c <value>       Credential for Basic Authentication (user:pass)
   --random-url, -r               Add a random string to the URL
   --random-url-length <value>    Random URL length (default: 8)
   --tls, -t                      Enable TLS/SSL
   --tls-crt <value>              TLS certificate file path
+    (default: "~/.gotty.crt")
   --tls-key <value>              TLS key file path
+    (default: "~/.gotty.key")
   --index <value>                Custom index.html file
   --title-format <value>         Title format (default: {{ .command }}@{{ .hostname }})
   --reconnect                    Enable reconnection
