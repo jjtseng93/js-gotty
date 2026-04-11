@@ -1,0 +1,16 @@
+{
+  "name": "js-gotty",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Node.js port of GoTTY using native HTTP, ws, and node-pty.",
+  "bin": {
+    "js-gotty": "./gotty.js"
+  },
+  "type": "commonjs",
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "optionalDependencies": {
+    "node-pty": "^1.0.0"
+  }
+}
