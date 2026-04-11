@@ -40,7 +40,7 @@ const DEFAULTS = {
   permitWrite: false,
   credential: "",
   randomUrl: false,
-  randomUrlLength: 8,
+  randomUrlLength: 16,
   tls: false,
   tlsCrt: "~/.gotty.crt",
   tlsKey: "~/.gotty.key",
@@ -48,9 +48,9 @@ const DEFAULTS = {
   titleFormat: "{{ .command }}@{{ .hostname }}",
   reconnect: false,
   reconnectTime: 10,
-  maxConnection: 0,
+  maxConnection: -1,
   once: false,
-  timeout: 0,
+  timeout: -1,
   permitArguments: false,
   passHeaders: false,
   width: 0,
@@ -74,38 +74,78 @@ function printUsage() {
 Usage: bun gotty.js [options] <command> [<arguments...>]
 
 Options:
-  --address, -a <value>          IP address to listen 
+  -a, --address <value>         IP address to listen 
     (default: 0.0.0.0)
-  --port, -p <value>             Port number to listen 
+    
+  -p, --port <value>            Port number to listen 
     (default: 8080)
-  --path, -m <value>             Base path 
+    
+  -w, --permit-write            Permits writing to the TTY
+    (default: disabled)
+
+  -m, --path <value>            Base path 
     (default: /)
-  --permit-write, -w             Permit clients to write to the TTY
-  --credential, -c <value>       Credential for Basic Authentication (user:pass)
-  --random-url, -r               Add a random string to the URL
-  --random-url-length <value>    Random URL length (default: 8)
-  --tls, -t                      Enable TLS/SSL
-  --tls-crt <value>              TLS certificate file path
-    (default: "~/.gotty.crt")
-  --tls-key <value>              TLS key file path
-    (default: "~/.gotty.key")
-  --index <value>                Custom index.html file
-  --title-format <value>         Title format (default: {{ .command }}@{{ .hostname }})
-  --reconnect                    Enable reconnection
-  --reconnect-time <value>       Time to reconnect in seconds
-  --max-connection <value>       Maximum concurrent clients
-  --once                         Accept only one client and exit on disconnect
-  --timeout <value>              Timeout waiting for first/next client
-  --permit-arguments             Permit query args from the client
-  --pass-headers                 Pass HTTP request headers as environment variables
-  --width <value>                Fixed terminal width
-  --height <value>               Fixed terminal height
-  --ws-origin <regex>            Allowed WebSocket Origin regex
-  --ws-query-args <value>        Query arguments appended by the browser client
-  --quiet                        Disable logging
-  --close-signal <value>         Signal sent to the child on close
-  --close-timeout <value>        Seconds before force kill after close (-1 disables)
-  --help, -h                     Show help`);
+    
+  -c, --credential <user:pass>  Credential for Basic Authentication 
+    
+  --once                        Accept only one client and exit on disconnect
+    (default: disabled)
+    
+  -r, --random-url              Add a random string to the URL
+  --random-url-length <value>   Random URL length 
+    (default: 16)
+    
+  -t, --tls                     Enable TLS/SSL
+  --tls-crt <value>             TLS certificate file path
+    (default: ~/.gotty.crt)
+  --tls-key <value>             TLS key file path
+    (default: ~/.gotty.key)
+    
+  --index <value>               Custom index.html file
+    (default: static/index.html)
+  --title-format <value>        Title format 
+    (default: {{ .command }}@{{ .hostname }} )
+    
+  --reconnect                   Enable reconnection
+    (default: disabled)
+  --reconnect-time <value>      Time to reconnect (seconds)
+    (default: 10)
+    
+  --max-connection <value>      Maximum concurrent clients
+    (default: -1 (no limit) )
+
+  --timeout <value>             Timeout waiting for first/next client (seconds)
+    (default: -1)
+    
+  --permit-arguments            Permit query args from the client
+    ?arg=a&arg=b... from URL => appends to command argv
+    (default: disabled)
+    
+  --pass-headers                Pass HTTP request headers as environment variables
+    Request headers => child env: HTTP_USER_AGENT=...
+    (default: disabled)
+    
+  --width <value>               Fixed terminal width
+    (default: 0 (auto) )
+  --height <value>              Fixed terminal height
+    (default: 0 (auto) )
+    
+  --ws-origin <regex>           Allowed WebSocket Origin regex
+    (default: disabled)
+  --ws-query-args <value>       Query arguments appended by the browser client
+    Adds a fixed query string to the WebSocket URL
+    Format: keyA=valA&keyB=valB
+    (default: empty)
+    
+  --quiet                       Disable logging
+    (default: log to stderr)
+    
+  --close-signal <value>        Signal sent to the child on close
+    (default: ${DEFAULTS.closeSignal})
+  --close-timeout <value>       Seconds before force kill after ${DEFAULTS.closeSignal}
+    (default: -1 (disabled) )
+    
+  --help, -h                    Show help`);
 }
 
 function fatal(message, code = 1) {
@@ -442,7 +482,7 @@ function parseArgs(argv) {
 
   if (commandArgs.length === 0) {
     printUsage();
-    fatal("Error: No command given.", 1);
+    fatal("\nError: No command given.", 1);
   }
 
   return {
@@ -2158,7 +2198,9 @@ function createServerRuntime(command, argv, options) {
     }
 
     const num = counter.add();
-    if (options.maxConnection !== 0 && num > options.maxConnection) {
+    if (options.maxConnection > 0 && 
+        num > options.maxConnection) 
+    {
       counter.done();
       socket.destroy();
       return;
@@ -2174,7 +2216,11 @@ function createServerRuntime(command, argv, options) {
   });
 
   wss.on("connection", (ws, req) => {
-    log(`New client connected: ${req.socket.remoteAddress}, connections: ${counter.count()}/${options.maxConnection}`);
+    log(`New client connected: ${req.socket.remoteAddress}`);
+    log(`  Connections count: ${counter.count()}`)
+
+    if(options.maxConnection>0)
+      log(`  Limit: ${options.maxConnection}`);
 
     let finalized = false;
     let session = null;
@@ -2188,7 +2234,13 @@ function createServerRuntime(command, argv, options) {
         activeSessions.delete(session);
       }
       const num = counter.done();
-      log(`Connection closed by ${reason}: ${req.socket.remoteAddress}, connections: ${num}/${options.maxConnection}`);
+      log(`Connection closed by ${reason}: ${req.socket.remoteAddress}`)
+
+      log(`  Connection count: ${num}`)
+
+      if(options.maxConnection>0)
+        log(`  Limit: ${options.maxConnection}`);
+        
       if (options.once) {
         shutdown(true);
       }
@@ -2274,20 +2326,24 @@ function createServerRuntime(command, argv, options) {
     }
     const host = address.address === "::" ? "127.0.0.1" : address.address;
     const formattedHost = net.isIPv6(host) ? `[${host}]` : host;
-    log(`HTTP server is listening at: ${scheme}://${formattedHost}:${address.port}${basePath}`);
+    log(`HTTP server is listening at: 
+    ${scheme}://${formattedHost}:${address.port}${basePath}`);
     if (options.address === "0.0.0.0") {
       try {
         const interfaces = os.networkInterfaces();
         for (const values of Object.values(interfaces)) {
           for (const value of values || []) {
             if (value.family === "IPv4" && !value.internal) {
-              log(`Alternative URL: ${scheme}://${value.address}:${address.port}${basePath}`);
+              log(`Alternative URL: 
+    ${scheme}://${value.address}:${address.port}${basePath}`);
             }
           }
         }
       } catch (error) {
-        log(`Alternative URL: ${scheme}://127.0.0.1:${address.port}${basePath}`);
-        log(`Alternative URL: ${scheme}://localhost:${address.port}${basePath}`);
+        log(`Alternative URL: 
+    ${scheme}://127.0.0.1:${address.port}${basePath}`);
+        log(`Alternative URL: 
+    ${scheme}://localhost:${address.port}${basePath}`);
       }
     }
   }
