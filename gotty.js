@@ -2242,7 +2242,9 @@ function createServerRuntime(command, argv, options) {
         log(`  Limit: ${options.maxConnection}`);
         
       if (options.once) {
-        shutdown(true);
+        log("Shutting down: --once")
+        shutdown(false);
+        process.exit(0);
       }
     };
 
