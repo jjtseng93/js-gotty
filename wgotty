@@ -42,14 +42,15 @@ elif [ "$1" = "showimg" ] ; then
 fi
 
 
-if basename "$runtime" | grep -q bun ||
+if ! [ -z "$PKG_RDIR" ] ; then
+  exec sh "$shr" bun "$sd"/gotty.js "$@"
+
+elif basename "$runtime" | grep -q bun ||
    [ -d "$WINDIR" ] ; then
 
   echo Using "$runtime" 1>&2
   exec "$runtime" "$sd"/gotty.js "$@"
   
-elif ! [ -z "$PKG_RDIR" ] ; then
-  exec sh "$shr" bun "$sd"/gotty.js "$@"
 else
   echo No bun binary found! 
   echo This project requires Bun runtime to run
