@@ -12176,13 +12176,15 @@
           authToken;
           reconnect;
           bufSize;
+          disconnected;
           constructor(e, t, i, r) {
             ((this.term = e),
               (this.connectionFactory = t),
               (this.args = i),
               (this.authToken = r),
               (this.reconnect = -1),
-              (this.bufSize = 1024));
+              (this.bufSize = 1024),
+              (this.disconnected = !1));
           }
           open() {
             let e,
@@ -12191,6 +12193,8 @@
             this.connection = r;
             const s = () => {
               (r.onOpen(() => {
+                this.disconnected = !1;
+                this.term.setDisconnected(!1);
                 const t = this.term.info();
                 (this.initializeConnection(this.args, this.authToken),
                   this.term.onResize((e, t) => {
@@ -12234,6 +12238,8 @@
                 }),
                 r.onClose(() => {
                   (clearInterval(e),
+                    (this.disconnected = !0),
+                    this.term.setDisconnected(!0),
                     this.term.deactivate(),
                     this.term.showMessage("Connection Closed", 0),
                     this.reconnect > 0 &&
@@ -12390,13 +12396,15 @@
               (this.message = e.ownerDocument.createElement("div")),
               (this.message.className = "xterm-overlay"),
               (this.messageTimeout = 2e3),
+              (this.disconnected = !1),
               (this.resizeListener = () => {
                 (this.fitAddOn.fit(),
                   this.term.scrollToBottom(),
-                  this.showMessage(
-                    String(this.term.cols) + "x" + String(this.term.rows),
-                    this.messageTimeout,
-                  ));
+                  this.disconnected ||
+                    this.showMessage(
+                      String(this.term.cols) + "x" + String(this.term.rows),
+                      this.messageTimeout,
+                    ));
               }),
               this.term.open(e),
               this.term.focus(),
@@ -12413,6 +12421,9 @@
           }
           getMessage() {
             return this.message;
+          }
+          setDisconnected(e) {
+            this.disconnected = !!e;
           }
           showMessage(e, t) {
             ((this.message.innerHTML = e), this.showMessageElem(t));

@@ -2244,7 +2244,7 @@ function createServerRuntime(command, argv, options) {
       if (options.once) {
         log("Shutting down: --once")
         shutdown(false);
-        process.exit(0);
+        setTimeout(()=>process.exit(0),2000);
       }
     };
 
