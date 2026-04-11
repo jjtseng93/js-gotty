@@ -2095,15 +2095,34 @@ function createServerRuntime(command, argv, options) {
     });
   };
 
-  const server = options.tls
-    ? https.createServer(
+  let server;
+  if (options.tls) {
+    const certPath = expandHome(options.tlsCrt);
+    const keyPath = expandHome(options.tlsKey);
+
+    try {
+      server = https.createServer(
         {
-          cert: fs.readFileSync(expandHome(options.tlsCrt)),
-          key: fs.readFileSync(expandHome(options.tlsKey))
+          cert: fs.readFileSync(certPath),
+          key: fs.readFileSync(keyPath)
         },
         requestHandler
-      )
-    : http.createServer(requestHandler);
+      );
+    } catch (error) {
+      console.error("TLS is enabled, but the certificate or key could not be loaded.");
+      console.error(`Certificate: ${certPath}`);
+      console.error(`Private key: ${keyPath}`);
+      console.error(`Reason: ${error.message}`);
+      console.error("");
+      console.error("You can generate a self-signed certificate for testing with:");
+      console.error(`openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes -keyout ${keyPath} -out ${certPath} -subj "/CN=localhost"`);
+      console.error("");
+      console.error("Or use a certificate and private key issued by a trusted certificate authority.");
+      process.exit(1);
+    }
+  } else {
+    server = http.createServer(requestHandler);
+  }
 
   const wss = new WebSocketServer({
     noServer: true,
