@@ -12520,6 +12520,26 @@
                   this.reconnectAction();
                 }
               });
+              e.addEventListener("contextmenu", (e) => {
+                e.preventDefault();
+                const t =
+                  "undefined" != typeof window &&
+                  window.__gottyWebTTY &&
+                  "string" == typeof window.__gottyWebTTY.reconnectToken
+                    ? window.__gottyWebTTY.reconnectToken
+                    : "";
+                const i = prompt("Reconnect token", t);
+                if (
+                  null !== i &&
+                  "undefined" != typeof window &&
+                  window.__gottyWebTTY
+                ) {
+                  window.__gottyWebTTY.reconnectToken = i.trim();
+                  if (this.reconnectAction) {
+                    this.reconnectAction();
+                  }
+                }
+              });
               this.message.appendChild(e);
             }
             this.showMessageElem(0);

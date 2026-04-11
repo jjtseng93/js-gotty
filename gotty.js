@@ -364,7 +364,7 @@ function formatReconnectTokenForLog(token) {
   if (!value) {
     return "-";
   }
-  return value.slice(0, 8);
+  return value // .slice(0, 8);
 }
 
 function parseInteger(name, value) {
@@ -2316,7 +2316,7 @@ function createServerRuntime(command, argv, options) {
 
   wss.on("connection", (ws, req) => {
     log(`\nNew client connected: ${req.socket.remoteAddress}`);
-    log(`  Connections count: ${counter.count()}`)
+    log(`  Connection count: ${counter.count()}`)
 
     if(options.maxConnection>0)
       log(`  Limit: ${options.maxConnection}`);
@@ -2367,7 +2367,9 @@ function createServerRuntime(command, argv, options) {
       if (options.reconnect && init.ReconnectToken) {
         const existing = reconnectRegistry.get(init.ReconnectToken);
         if (existing && existing.canResume(init.ReconnectToken)) {
-          log(`  Reconnect token: ${formatReconnectTokenForLog(init.ReconnectToken)} (resume)`);
+          log(`  Reconnect token: (resume)
+  ${formatReconnectTokenForLog(init.ReconnectToken)}
+`);
           session = existing;
           session.attachWebSocket(ws, req.socket.remoteAddress || "");
           return;
@@ -2422,7 +2424,9 @@ function createServerRuntime(command, argv, options) {
       if (session.reconnectToken) {
         reconnectRegistry.set(session.reconnectToken, session);
       }
-      log(`  Reconnect token: ${formatReconnectTokenForLog(session.reconnectToken)}`);
+      log(`  Reconnect token: 
+  ${formatReconnectTokenForLog(session.reconnectToken)}
+`);
       session.start();
     });
   });
