@@ -15,7 +15,8 @@ print_install_script() {
   echo '  powershell -c "irm bun.sh/install.ps1 | iex"'
 }
 
-if [ -f "$(command -v bun)" ] ; then
+if [ -f "$(command -v bun)" ] ||
+   ! [ -z "$PKG_RDIR" ] ; then
   runtime=bun
 elif [ -f "$HOME/.bun/bin/bun" ] ; then
   runtime="$HOME/.bun/bin/bun"
