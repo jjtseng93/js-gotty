@@ -49,6 +49,19 @@ bun gotty.js
 bun gotty.js -h
 ```
 
+### Wrapper
+- wgotty is a wrapper for Linux
+- or Windows with busybox64u.exe bash
+- https://frippery.org/busybox/
+- just run ./wgotty and it will 
+- detect installation status of Bun
+- and show installation script if needed
+
+## Tested platforms 已測試作業系統
+- Windows x64: Windows 11
+- Linux x64: CachyOS
+- Android arm64: Termux proot, 
+- Android arm64: My App
 
 ## Current implementation 目前實做
 - 使用node原生 `http`/`https`

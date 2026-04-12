@@ -2455,7 +2455,8 @@ function createServerRuntime(command, argv, options) {
     const host = address.address === "::" ? "127.0.0.1" : address.address;
     const formattedHost = net.isIPv6(host) ? `[${host}]` : host;
     log(`HTTP server is listening at: 
-    ${scheme}://${formattedHost}:${address.port}${basePath}`);
+    ${scheme}://${formattedHost}:${address.port}${basePath}
+`);
     if (options.address === "0.0.0.0") {
       try {
         const interfaces = os.networkInterfaces();
@@ -2463,15 +2464,18 @@ function createServerRuntime(command, argv, options) {
           for (const value of values || []) {
             if (value.family === "IPv4" && !value.internal) {
               log(`Alternative URL: 
-    ${scheme}://${value.address}:${address.port}${basePath}`);
+    ${scheme}://${value.address}:${address.port}${basePath}
+`);
             }
           }
         }
       } catch (error) {
         log(`Alternative URL: 
-    ${scheme}://127.0.0.1:${address.port}${basePath}`);
+    ${scheme}://127.0.0.1:${address.port}${basePath}
+`);
         log(`Alternative URL: 
-    ${scheme}://localhost:${address.port}${basePath}`);
+    ${scheme}://localhost:${address.port}${basePath}
+`);
       }
     }
   }
