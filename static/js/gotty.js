@@ -15771,7 +15771,9 @@
                       _inputEvent(e) {
                         if (
                           e.data &&
-                          "insertText" === e.inputType &&
+                          ("insertText" === e.inputType ||
+                            ("string" == typeof e.inputType &&
+                              e.inputType.startsWith("insert"))) &&
                           (!e.composed || !this._keyDownSeen) &&
                           !this.optionsService.rawOptions.screenReaderMode
                         ) {
