@@ -1455,11 +1455,12 @@ class PtySession {
     this.reconnectTimer = null;
     this.reconnectToken = options.reconnect ? generateReconnectToken() : "";
     this.backend = createPtyBackend(options);
+    this.supportsWindowsBridge = process.platform === "win32";
     this.cursorTracker = new CursorStateTracker();
     this.cursorTracker.setDimensions(this.columns || 80);
     this.kittyParser = new KittyGraphicsParser();
-    this.windowsBridgeParser = new WindowsBridgeParser("incoming");
-    this.outgoingWindowsBridgeParser = new WindowsBridgeParser("outgoing");
+    this.windowsBridgeParser = this.supportsWindowsBridge ? new WindowsBridgeParser("incoming") : null;
+    this.outgoingWindowsBridgeParser = this.supportsWindowsBridge ? new WindowsBridgeParser("outgoing") : null;
     this.windowsUploadRequests = new Map();
     this.windowsBridgeSeen = new Set();
     this.windowsBridgeSeenOrder = [];
@@ -1489,6 +1490,11 @@ class PtySession {
       for (const chunk of parsed.plain) {
         const filteredChunk = this.filterEchoedTerminalReplies(chunk);
         if (filteredChunk.length === 0) {
+          continue;
+        }
+        if (!this.supportsWindowsBridge) {
+          this.cursorTracker.consume(filteredChunk);
+          this.sendChunk(MSG_OUTPUT, filteredChunk);
           continue;
         }
         const bridged = this.windowsBridgeParser.consume(filteredChunk);
@@ -1888,7 +1894,7 @@ class PtySession {
   }
 
   sendChunk(type, raw) {
-    if (type === MSG_OUTPUT) {
+    if (type === MSG_OUTPUT && this.supportsWindowsBridge) {
       const bridged = this.outgoingWindowsBridgeParser.consume(raw);
       for (const control of bridged.controls) {
         this.handleWindowsBridgeControl(control);
@@ -2030,7 +2036,7 @@ class PtySession {
         this.send(MSG_PONG, "");
         break;
       case MSG_WINDOWS_BRIDGE: {
-        if (!this.permitWrite || payload.length === 0) {
+        if (!this.supportsWindowsBridge || !this.permitWrite || payload.length === 0) {
           return;
         }
         let message;
