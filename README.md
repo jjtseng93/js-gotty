@@ -1,5 +1,11 @@
 # js-gotty / gotty.js
 
+## News
+### 2026/04/21
+- Added show text in dialog for frontend:
+- alert_advanced(getTerminalText())
+- for copying text on mobile devices
+
 ## Intro 介紹
 - 這是用 JavaScript / Bun 重新實作的 GoTTY 相容伺服器
 - 參考了原本的GoTTY的程式碼 大部分以Codex生成
