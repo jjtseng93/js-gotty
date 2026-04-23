@@ -1,6 +1,9 @@
 # js-gotty / gotty.js
 
 ## News
+### 2026/04/23
+- Added optional noWinOpenUseFetch() at the frontend for Bun markdown TUI:
+- https://github.com/jjtseng93/bun-taskmgr
 ### 2026/04/21
 - Added show text in dialog for frontend:
 - alert_advanced(getTerminalText())
