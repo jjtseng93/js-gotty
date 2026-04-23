@@ -1,53 +1,5 @@
 /*! For license information please see gotty.js.LICENSE.txt */
 
-function alert_advanced(text) {
-// 若已有舊 dialog，先移除
-const old = document.getElementById("alert-advanced-dialog");
-if (old) old.remove();
-
-// 建立外層遮罩（透明 + 可點擊關閉）
-const overlay = document.createElement("div");
-overlay.id = "alert-advanced-dialog";
-overlay.style.position = "fixed";
-overlay.style.top = "0";
-overlay.style.left = "0";
-overlay.style.width = "100vw";
-overlay.style.height = "100vh";
-overlay.style.background = "rgba(0,0,0,0.35)";
-overlay.style.backdropFilter = "blur(2px)";
-overlay.style.display = "flex";
-overlay.style.alignItems = "center";
-overlay.style.justifyContent = "center";
-overlay.style.zIndex = "99999";
-
-// 建立對話框內容
-const box = document.createElement("div");
-box.style.maxWidth = "80vw"; // 隨螢幕自適應
-box.style.maxHeight = "70vh"; // 可捲動高度
-box.style.padding = "2vh 2vw";
-box.style.background = "#fff";
-box.style.borderRadius = "1.5vh";
-box.style.boxShadow = "0 0 2vh rgba(0,0,0,0.3)";
-box.style.overflowY = "auto"; // 內容可捲動
-//box.style.fontSize = "14px";
-
-box.style.wordBreak = "break-all";
-box.style.whiteSpace = "pre-wrap";
-
-box.innerText = text;
-
-// 點擊任意區域關閉
-overlay.addEventListener("click", () => overlay.remove());
-
-// 防止點擊到內容時事件冒泡關閉（如果你想點內容也關閉，移除這段）
-box.addEventListener("click", (e) => e.stopPropagation());
-
-overlay.appendChild(box);
-document.body.appendChild(overlay);
-}
-
-window.alert_advanced = alert_advanced ;
-
 (() => {
   var e = {
       5: (e) => {

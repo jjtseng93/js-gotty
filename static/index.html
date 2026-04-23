@@ -22,6 +22,129 @@
   <script src="./js/windows_bridge.js"></script>
   <script src="./js/zmodem.js"></script>
   <script src="./js/gotty.js"></script>
+
+
+<script>
+
+
+function alert_advanced(text,asHtml,closeOnClick) {
+// 若已有舊 dialog，先移除
+const old = document.getElementById("alert-advanced-dialog");
+if (old) old.remove();
+
+// 建立外層遮罩（透明 + 可點擊關閉）
+const overlay = document.createElement("div");
+overlay.id = "alert-advanced-dialog";
+overlay.style.position = "fixed";
+overlay.style.top = "0";
+overlay.style.left = "0";
+overlay.style.width = "100vw";
+overlay.style.height = "100vh";
+overlay.style.background = "rgba(0,0,0,0.35)";
+overlay.style.backdropFilter = "blur(2px)";
+overlay.style.display = "flex";
+overlay.style.alignItems = "center";
+overlay.style.justifyContent = "center";
+overlay.style.zIndex = "99999";
+
+// 建立對話框內容
+const box = document.createElement("div");
+box.style.maxWidth = "80vw"; // 隨螢幕自適應
+box.style.maxHeight = "70vh"; // 可捲動高度
+box.style.padding = "2vh 2vw";
+box.style.background = "#fff";
+box.style.borderRadius = "1.5vh";
+box.style.boxShadow = "0 0 2vh rgba(0,0,0,0.3)";
+box.style.overflowY = "auto"; // 內容可捲動
+//box.style.fontSize = "14px";
+
+box.style.wordBreak = "break-all";
+box.style.whiteSpace = "pre-wrap";
+
+
+if(asHtml)
+  box.innerHTML = text ;
+else
+  box.innerText = text;
+  
+
+// 點擊任意區域關閉
+overlay.addEventListener("click", () => overlay.remove());
+
+//  Default: no close on clicking content
+if(!closeOnClick)
+  box.addEventListener("click", (e) => e.stopPropagation());
+
+overlay.appendChild(box);
+document.body.appendChild(overlay);
+}  //  alert_advanced
+
+
+
+function noWinOpenUseFetch(){
+
+let lang = (navigator.language||"")+""
+
+let chi = lang.toLowerCase().includes("zh")
+
+if(chi)
+  alert("從現在起，按下終端機內的連結會直接觸發fetch(url)。請小心別誤點可疑連結，重新整理頁面即可回復");
+else
+  alert("From now on, clicking on links in the terminal directly fetch(url). Please be careful not to click on suspicious links. Refreshing the page reverts this effect.");
+
+if(confirm.toString().includes("native"))
+{
+  window.realConfirm = confirm ;
+  confirm = ()=>true ;
+}
+
+if(window.open.toString().includes("native"))
+{
+  window.realWinOpen=window.open;
+
+  window.fetchText = async (url)=>{
+        let txt = await new Promise(res=>{
+          fetch(url).then(r=>r.text())
+          .then(res).catch(res)
+        });
+        
+        return txt ;
+  }
+
+  window.open = (url)=>{
+  
+    if(url)  
+    {
+      (async ()=>{
+
+        let txt = await window.fetchText(url);
+        if(txt) alert(txt);
+
+        return {location:{}};
+      })()
+
+      return null
+    }
+
+    return {location:{
+      set href(url){
+        (async ()=>{
+
+        let txt = await window.fetchText(url);
+        if(txt) alert(txt);
+
+        })()
+      }
+    }}
+  }
+}
+
+}  // noWinOpenUseFetch
+
+
+</script>
+
+
 </body>
 
 </html>
