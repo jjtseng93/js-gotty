@@ -71,6 +71,7 @@ bun gotty.js -h
 - Linux x64: CachyOS
 - Android arm64: Termux proot, 
 - Android arm64: My App
+  * https://drive.google.com/drive/folders/18iwbKrAZfA-HoTSP9I5MzGz5xVFMZ4bg
 
 ## Current implementation 目前實做
 - 使用node原生 `http`/`https`
