@@ -13777,11 +13777,13 @@
                       return t ? "[200~" + e + "[201~" : e;
                     }
                     function s(e, t, s, n) {
+                      const o = e;
                       ((e = r(
                         (e = i(e)),
                         s.decPrivateModes.bracketedPasteMode &&
                           !0 !== n.rawOptions.ignoreBracketedPasteMode,
                       )),
+                        (t.__gottyLastPaste = { data: o, at: Date.now() }),
                         s.triggerDataEvent(e, !0),
                         (t.value = ""));
                     }
@@ -15781,6 +15783,18 @@
                         );
                       }
                       _inputEvent(e) {
+                        const t =
+                          this.textarea &&
+                          this.textarea.__gottyLastPaste &&
+                          "string" == typeof e.inputType &&
+                          e.inputType.startsWith("insertFromPaste") &&
+                          Date.now() - this.textarea.__gottyLastPaste.at < 1e3;
+                        if (t)
+                          return (
+                            (this.textarea.__gottyLastPaste = void 0),
+                            this.cancel(e),
+                            !0
+                          );
                         if (
                           e.data &&
                           ("insertText" === e.inputType ||
@@ -15791,9 +15805,9 @@
                         ) {
                           if (this._keyPressHandled) return !1;
                           this._unprocessedDeadKey = !1;
-                          const t = e.data;
+                          const i = e.data;
                           return (
-                            this.coreService.triggerDataEvent(t, !0),
+                            this.coreService.triggerDataEvent(i, !0),
                             this.cancel(e),
                             !0
                           );
