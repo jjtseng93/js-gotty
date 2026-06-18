@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 //Object.defineProperty(process,"platform",{value:'linux'})
 
