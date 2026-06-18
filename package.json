@@ -1,10 +1,9 @@
 {
-  "name": "js-gotty",
-  "version": "0.1.0",
-  "private": true,
-  "description": "A Node.js port of GoTTY using native HTTP, ws, and node-pty.",
+  "name": "jsgotty",
+  "version": "0.9.0",
+  "description": "Share your terminal as a web application: A JavaScript rewrite of GoTTY",
   "bin": {
-    "js-gotty": "./gotty.js"
+    "jsgotty": "./gotty.js"
   },
   "type": "commonjs",
   "dependencies": {

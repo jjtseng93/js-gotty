@@ -33,6 +33,13 @@
 
 ## Usage 用法
 
+### Install Bun 安裝 Bun
+- Android/Termux:
+  * pkg install npm
+  * npm install -g bun
+- Other platforms:
+  * https://bun.com
+
 ### Linux
 
 ```sh
@@ -43,6 +50,8 @@ bun gotty.js -w --reconnect --reconnect-time 30 fish
 bun gotty.js -w --reconnect --reconnect-time -1 fish
 bun gotty.js -w -p 8000 fish
 
+# or npx jsgotty@latest
+
 # show help
 bun gotty.js
 ```
@@ -52,6 +61,8 @@ bun gotty.js
 ```sh
 bun gotty.js -w cmd.exe
 bun gotty.js -w powershell
+
+# or npx jsgotty@latest
 
 # show help
 bun gotty.js
@@ -69,7 +80,7 @@ bun gotty.js -h
 ## Tested platforms 已測試作業系統
 - Windows x64: Windows 11
 - Linux x64: CachyOS
-- Android arm64: Termux proot, 
+- Android arm64: Termux Native/Proot
 - Android arm64: My App
   * https://drive.google.com/drive/folders/18iwbKrAZfA-HoTSP9I5MzGz5xVFMZ4bg
 
