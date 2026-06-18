@@ -1,6 +1,6 @@
 {
   "name": "jsgotty",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Share your terminal as a web application: A JavaScript rewrite of GoTTY",
   "bin": {
     "jsgotty": "./gotty.js"
