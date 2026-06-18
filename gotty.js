@@ -66,6 +66,18 @@ const STATIC_ROOT = path.resolve(__dirname, "./static");
 const DEFAULT_INDEX = path.join(STATIC_ROOT, "index.html");
 const DEFAULT_MANIFEST = path.join(STATIC_ROOT, "manifest.json");
 
+{for(let i of ['rz.js','sz.js','viu.mjs'])
+{
+ if(process.argv[2]=="--"+i.split('.')[0])
+ {
+  process.argv.splice(2,1);
+  process.argv[1]=process.argv[1].replace('gotty.js',i)
+  
+  let pexe=globalThis.Bun?.which?.('bun') || process.argv0 ;
+  process.execve(pexe,process.argv,process.env);
+ }
+}}
+
 
 const pkg = require('./package.json');
 
