@@ -66,10 +66,15 @@ const STATIC_ROOT = path.resolve(__dirname, "./static");
 const DEFAULT_INDEX = path.join(STATIC_ROOT, "index.html");
 const DEFAULT_MANIFEST = path.join(STATIC_ROOT, "manifest.json");
 
+
+const pkg = require('./package.json');
+
+
 function printUsage() {
   console.log(`GoTTY JavaScript rewrite
   Linux/macOS: use Bun
   Windows: use Bun/Node
+Version: ${pkg.version}
   
 Usage: bun gotty.js [options] <command> [<arguments...>]
 
