@@ -29,6 +29,7 @@
 ### PTY Backends PTY後端策略
 - Linux / macOS: 使用 Bun 內建 PTY `Bun.spawn(..., { terminal: ... })`
 - Windows: 使用patched `node-pty`，但整體以 `bun` 啟動 `gotty.js`
+  * 將來會全面使用 Bun
 
 
 ## Usage 用法

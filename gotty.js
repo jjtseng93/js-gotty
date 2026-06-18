@@ -1202,7 +1202,7 @@ class NodePtyBackend {
   constructor(options) {
     let nodePty;
     try {
-      nodePty = require("node-pty");
+      nodePty = require("./lib/node-pty");
     } catch (error) {
       throw new Error("node-pty is required on Windows but is not installed");
     }
