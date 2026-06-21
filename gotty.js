@@ -68,7 +68,7 @@ const STATIC_ROOT = path.resolve(__dirname, "./static");
 const DEFAULT_INDEX = path.join(STATIC_ROOT, "index.html");
 const DEFAULT_MANIFEST = path.join(STATIC_ROOT, "manifest.json");
 
-{for(let i of ['rz.js','sz.js','viu.mjs'])
+{for(let i of ['rz.js','sz.js','viu.mjs',"client.mjs"])
 {
  if(process.argv[2]=="--"+i.split('.')[0])
  {
@@ -2354,7 +2354,7 @@ function createServerRuntime(command, argv, options) {
       const publicOrigin = `${scheme}://${requestHost || fallbackHost}`;
 
       const lines = [
-        "# Session list",
+        "# Current Session(s)",
         "- Click on the links directly or with Ctrl+Click to reconnect to session",
         "- Or use bun client.js -r pid",
         "## PID SESSION",
