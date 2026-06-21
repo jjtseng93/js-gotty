@@ -21,23 +21,33 @@ const DEFAULT_URL = "ws://127.0.0.1:8080/ws";
 
 function usage() {
   console.log(`Usage:
-  bun client.mjs [target] [options]
-  ./client.mjs [target] [options]
+  bun client.mjs [options] [target]
 
 Target:
   Defaults to ${DEFAULT_URL}
-  A number is treated as a localhost port, for example 8080.
+  A pure number is treated as a localhost port, for example 8080.
   Accepts http(s) page URLs or ws(s) WebSocket URLs.
 
 Options:
-  -c, --credential <user:pass>       GoTTY credential/AuthToken
-  -r, --reconnect-token <token|pid>  Resume a session by token or PID
-      --readonly                     Never request terminal write access
-      --arg <value>                  Add ?arg=<value> to the init Arguments
-      --arguments <query>            Raw init Arguments, for example "?arg=bash"
-      --cols <number>                Initial terminal columns
-      --rows <number>                Initial terminal rows
-  -h, --help                         Show help
+  -r, --reconnect-token <token|pid> 
+    Resume a session by token or PID
+  -ls                                
+    List reconnectable sessions and exit
+  
+  -c, --credential <user:pass>       
+    GoTTY credential/AuthToken
+  --readonly                     
+    Never request terminal write access
+  --arg <value>                  
+    Add ?arg=<value> to the init Arguments
+  --arguments <query>            
+    Raw init Arguments, for example "?arg=bash"
+  --cols <number>               
+    Initial terminal columns
+  --rows <number>                
+    Initial terminal rows
+  -h, --help                        
+    Show help
 
 Environment:
   GOTTY_CREDENTIAL
@@ -53,7 +63,8 @@ function parseArgs(argv) {
     args: [],
     cols: 0,
     rows: 0,
-    readonly: false
+    readonly: false,
+    listSessions: false
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -79,6 +90,9 @@ function parseArgs(argv) {
       case "-r":
       case "--reconnect-token":
         options.reconnectToken = next();
+        break;
+      case "-ls":
+        options.listSessions = true;
         break;
       case "--readonly":
         options.readonly = true;
@@ -188,10 +202,47 @@ function writeStatus(message) {
   process.stderr.write(`${message.replaceAll("[gotty]", label)}\n`);
 }
 
-function main() {
+function sessionListUrl(wsUrl) {
+  const url = new URL(wsUrl);
+  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+  url.pathname = url.pathname.endsWith("/ws")
+    ? `${url.pathname.slice(0, -2)}css.md`
+    : `${url.pathname.replace(/\/?$/, "/")}css.md`;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+async function listSessions(options, wsUrl) {
+  const url = sessionListUrl(wsUrl);
+  const headers = {};
+  if (options.credential) {
+    headers.Authorization = `Basic ${Buffer.from(options.credential).toString("base64")}`;
+  }
+
+  try {
+    const response = await fetch(url, { headers });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const markdown = await response.text();
+    const markdownToAnsi = globalThis.Bun?.markdown?.ansi;
+    const output = typeof markdownToAnsi === "function"
+      ? markdownToAnsi(markdown)
+      : markdown;
+    process.stdout.write(output.endsWith("\n") ? output : `${output}\n`);
+  } catch (error) {
+    writeStatus(`[gotty] 無法列出 sessions：舊版或 Golang GoTTY 伺服器不支援此功能\n  ${error.message}`);
+    process.exitCode = 1;
+  }
+}
+
+async function main() {
   const cliArgs = process.argv.slice(2);
   if (cliArgs[0] === "attach") {
     cliArgs[0] = "-r";
+  } else if (["ls", "list", "list-sessions"].includes(cliArgs[0])) {
+    cliArgs[0] = "-ls";
   }
   const options = parseArgs(cliArgs);
   options.reconnectToken = options.reconnectToken.trim();
@@ -202,6 +253,10 @@ function main() {
   } = normalizeUrl(options.url);
   if (!options.reconnectToken && urlReconnectToken) {
     options.reconnectToken = urlReconnectToken;
+  }
+  if (options.listSessions) {
+    await listSessions(options, wsUrl);
+    return;
   }
   const args = buildArguments(options, initArguments);
   writeStatus(`[gotty] connecting to\n  ${wsUrl}`);
@@ -492,7 +547,7 @@ pid:
 }
 
 try {
-  main();
+  await main();
 } catch (error) {
   console.error(`client.mjs: ${error.message}`);
   process.exit(1);

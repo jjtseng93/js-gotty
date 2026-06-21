@@ -2293,7 +2293,7 @@ function createServerRuntime(command, argv, options) {
       return;
     }
 
-    if (relativePath === "css.md") {
+    if (relativePath === "css.md" || relativePath === "css") {
       const sessions = [];
       for (const [token, session] of reconnectRegistry) {
         if (!session || !session.canResume(token)) {
@@ -2310,23 +2310,40 @@ function createServerRuntime(command, argv, options) {
         sessions.push({ pid, name, token: reconnectToken });
       }
       sessions.sort((left, right) => Number(left.pid) - Number(right.pid));
+      const scheme = options.tls ? "https" : "http";
+      const requestHost = String(req.headers.host || "").trim();
+      const fallbackAddress = server.address();
+      const fallbackHost = fallbackAddress && typeof fallbackAddress !== "string"
+        ? `${net.isIPv6(fallbackAddress.address) ? `[${fallbackAddress.address}]` : fallbackAddress.address}:${fallbackAddress.port}`
+        : "127.0.0.1";
+      const publicOrigin = `${scheme}://${requestHost || fallbackHost}`;
 
       const lines = [
         "# Session list",
-        "# PID SESSION",
+        "- Click on the links directly or with Ctrl+Click to reconnect to session",
+        "- Or use bun client.js -r pid",
+        "## PID SESSION",
         ...(sessions.length > 0
           ? sessions.map((session) => {
               const name = session.name.replace(/([\\[\]])/g, "\\$1");
-              const reconnectUrl = `${basePath}?reconnect-token=${encodeURIComponent(session.token)}`;
+              const reconnectUrl = `${publicOrigin}${basePath}?reconnect-token=${encodeURIComponent(session.token)}`;
               return `- ${session.pid} [${name}](${reconnectUrl})`;
             })
           : ["- 無 無"])
       ];
+      const markdown = `${lines.join("\n")}\n`;
+      const markdownToHtml = global.Bun?.markdown?.html;
+      const renderHtml = relativePath === "css" && typeof markdownToHtml === "function";
+      const body = renderHtml
+        ? markdownToHtml(markdown)
+        : markdown;
       res.writeHead(200, {
-        "Content-Type": "text/markdown; charset=utf-8",
+        "Content-Type": renderHtml
+          ? "text/html; charset=utf-8"
+          : "text/markdown; charset=utf-8",
         "Server": "GoTTY"
       });
-      res.end(`${lines.join("\n")}\n`);
+      res.end(body);
       return;
     }
 
