@@ -1318,6 +1318,11 @@ class NodePtyBackend {
       this.closeTimer = null;
     }
 
+    if (process.platform === "win32") {
+      this.kill();
+      return;
+    }
+
     this.kill(this.options.closeSignal);
     if (this.options.closeTimeout >= 0) {
       this.closeTimer = setTimeout(() => {
