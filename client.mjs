@@ -232,6 +232,10 @@ async function listSessions(options, wsUrl) {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("text/markdown")) {
+      throw new Error(`unexpected Content-Type: ${contentType || "(missing)"}`);
+    }
     const markdown = await response.text();
     const markdownToAnsi = globalThis.Bun?.markdown?.ansi;
     const output = typeof markdownToAnsi === "function"
@@ -239,7 +243,8 @@ async function listSessions(options, wsUrl) {
       : markdown;
     process.stdout.write(output.endsWith("\n") ? output : `${output}\n`);
   } catch (error) {
-    writeStatus(`[gotty] 無法列出 sessions：舊版或 Golang GoTTY 伺服器不支援此功能\n  ${error.message}`);
+    writeStatus(`[gotty] 無法列出 sessions：舊版或 Golang GoTTY 伺服器不支援此功能
+Can't list sessions: older or Golang GoTTY servers do not support this feature`);
     process.exitCode = 1;
   }
 }
@@ -260,10 +265,10 @@ async function disconnectWriter(options, wsUrl) {
     };
     const timer = setTimeout(() => {
       writeStatus("[gotty] writer disconnect request timed out");
+      finish(1);
       try {
         ws.close();
       } catch {}
-      finish(1);
     }, 5000);
 
     ws.on("open", () => {
