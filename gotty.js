@@ -68,17 +68,20 @@ const STATIC_ROOT = path.resolve(__dirname, "./static");
 const DEFAULT_INDEX = path.join(STATIC_ROOT, "index.html");
 const DEFAULT_MANIFEST = path.join(STATIC_ROOT, "manifest.json");
 
-{for(let i of ['rz.js','sz.js','viu.mjs',"client.mjs"])
-{
- if(process.argv[2]=="--"+i.split('.')[0])
- {
-  process.argv.splice(2,1);
-  process.argv[1]=process.argv[1].replace('gotty.js',i)
-  
-  let pexe=globalThis.Bun?.which?.('bun') || process.argv0 ;
-  process.execve(pexe,process.argv,process.env);
- }
-}}
+let cliBootstrapPromise = null;
+for (const i of ["rz.js", "sz.js", "viu.mjs", "client.mjs"]) {
+  if (process.argv[2] === `--${i.split(".")[0]}`) {
+    process.argv.splice(2, 1);
+    process.argv[1] = process.argv[1].replace(/gotty\.js$/, i);
+    cliBootstrapPromise = (async () => {
+      await import(`./${i}`);
+    })().catch((error) => {
+      console.error(String(error && error.stack ? error.stack : error));
+      process.exitCode = 1;
+    });
+    break;
+  }
+}
 
 
 const pkg = require('./package.json');
@@ -91,6 +94,12 @@ function printUsage() {
 Version: ${pkg.version}
   
 Usage: bun gotty.js [options] <command> [<arguments...>]
+
+Built-in tools:
+  --rz                          Start rz.js
+  --sz                          Start sz.js
+  --viu                         Start viu.mjs
+  --client                      Start client.mjs
 
 Options:
   -a, --address <value>         IP address to listen 
@@ -2664,7 +2673,7 @@ function createServerRuntime(command, argv, options) {
     const formattedHost = net.isIPv6(host) ? `[${host}]` : host;
     log(`HTTP server is listening at: 
     ${scheme}://${formattedHost}:${address.port}${basePath}
-  Access mode: ${accessMode}
+Access mode: ${accessMode}
 `);
     const hasCustomPath = normalizeBasePath(options.path) !== "/";
     const customPathValue = normalizeBasePath(options.path)
@@ -2757,4 +2766,6 @@ function main() {
   runtime.start();
 }
 
-main();
+if (!cliBootstrapPromise) {
+  main();
+}

@@ -294,6 +294,7 @@ function parseSvgSize(buffer) {
   }
 
   const widthMatch = sample.match(/\bwidth=["']([0-9.]+)(px)?["']/i);
+  //'"
   const heightMatch = sample.match(/\bheight=["']([0-9.]+)(px)?["']/i);
   if (widthMatch && heightMatch) {
     return {
