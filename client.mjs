@@ -324,7 +324,8 @@ pid:
 
 async function main() {
   const cliArgs = process.argv.slice(2);
-  if (cliArgs[0] === "attach") {
+  if (cliArgs[0] === "attach" ||
+      cliArgs[0] === "a") {
     cliArgs[0] = "-r";
   } else if (cliArgs[0] === "detach") {
     cliArgs[0] = "-d";
