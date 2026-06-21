@@ -2202,6 +2202,14 @@ class PtySession {
         return result;
       };
 
+      if (process.platform === "win32") {
+        this.backend.kill();
+        if (await waitForExit(gracePeriodMs)) {
+          return { forced: true };
+        }
+        throw new Error("process did not exit after PTY kill");
+      }
+
       this.backend.kill("SIGTERM");
       if (await waitForExit(gracePeriodMs)) {
         return { forced: false };
