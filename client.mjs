@@ -264,6 +264,7 @@ async function sendSessionControl(options, wsUrl, {
   errorPrefix,
   timeoutMessage,
   unsupportedMessage,
+  timeoutMs = 5000,
 }) {
   await new Promise((resolve) => {
     const ws = new WebSocket(wsUrl, "webtty");
@@ -283,7 +284,7 @@ async function sendSessionControl(options, wsUrl, {
       try {
         ws.close();
       } catch {}
-    }, 5000);
+    }, timeoutMs);
 
     ws.on("open", () => {
       ws.send(JSON.stringify({
@@ -359,7 +360,8 @@ token:
   ${result.token || "(none)"}`,
     errorPrefix: "[gotty] failed to terminate session:",
     timeoutMessage: "[gotty] session terminate request timed out",
-    unsupportedMessage: "[gotty] server does not support session terminate"
+    unsupportedMessage: "[gotty] server does not support session terminate",
+    timeoutMs: 7000
   });
 }
 

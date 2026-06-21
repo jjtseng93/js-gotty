@@ -1485,6 +1485,10 @@ class PtySession {
     this.bufferSize = 1024;
     this.closed = false;
     this.backendExited = false;
+    this.backendExitPromise = new Promise((resolve) => {
+      this.resolveBackendExit = resolve;
+    });
+    this.backendTerminationPromise = null;
     this.reconnectTimer = null;
     this.reconnectToken = options.reconnect ? generateReconnectToken() : "";
     this.backend = createPtyBackend(options);
@@ -1558,6 +1562,7 @@ class PtySession {
 
     this.backend.onExit(() => {
       this.backendExited = true;
+      this.resolveBackendExit();
       this.terminate(1000, "process exited", { skipBackendClose: true });
     });
 
@@ -2174,6 +2179,45 @@ class PtySession {
     }
   }
 
+  terminateBackend(gracePeriodMs = 5000) {
+    if (this.backendTerminationPromise) {
+      return this.backendTerminationPromise;
+    }
+
+    this.backendTerminationPromise = (async () => {
+      if (this.backendExited) {
+        return { forced: false };
+      }
+
+      const waitForExit = async (timeoutMs) => {
+        let timer = null;
+        const timedOut = new Promise((resolve) => {
+          timer = setTimeout(() => resolve(false), timeoutMs);
+        });
+        const exited = this.backendExitPromise.then(() => true);
+        const result = await Promise.race([exited, timedOut]);
+        if (timer) {
+          clearTimeout(timer);
+        }
+        return result;
+      };
+
+      this.backend.kill("SIGTERM");
+      if (await waitForExit(gracePeriodMs)) {
+        return { forced: false };
+      }
+
+      this.backend.kill("SIGKILL");
+      if (await waitForExit(gracePeriodMs)) {
+        return { forced: true };
+      }
+
+      throw new Error("process did not exit after SIGKILL");
+    })();
+
+    return this.backendTerminationPromise;
+  }
+
   terminate(code, reason, { skipBackendClose = false } = {}) {
     if (this.closed) {
       return;
@@ -2540,7 +2584,7 @@ function createServerRuntime(command, argv, options) {
     ws.once("close", () => finish("client"));
     ws.once("error", (error) => finish(`an error: ${error.message}`));
 
-    ws.once("message", (message, isBinary) => {
+    ws.once("message", async (message, isBinary) => {
       if (isBinary) {
         ws.close(1008, "invalid message type");
         return;
@@ -2595,12 +2639,14 @@ function createServerRuntime(command, argv, options) {
 
       if (init.TerminateSession) {
         const existing = findSessionByIdentifier(init.ReconnectToken);
+        const token = existing?.reconnectToken || "";
+        const pid = existing?.backend?.pid || "";
         const result = existing
           ? {
               ok: true,
               message: "session terminated",
-              token: existing.reconnectToken || "",
-              pid: existing.backend && existing.backend.pid ? existing.backend.pid : ""
+              token,
+              pid
             }
           : {
               ok: false,
@@ -2609,7 +2655,10 @@ function createServerRuntime(command, argv, options) {
 
         if (existing) {
           try {
-            existing.close(1001, "terminated by remote request");
+            const termination = await existing.terminateBackend(5000);
+            if (termination.forced) {
+              result.message = "session force killed";
+            }
           } catch (error) {
             result.ok = false;
             result.message = `failed to terminate session: ${error.message}`;
