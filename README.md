@@ -92,6 +92,51 @@ bun gotty.js --client
 - `--viu` starts `viu.mjs`
 - `--client` starts `client.mjs`
 
+### CLI Client
+
+`client.mjs` 是可直接連接 GoTTY 的互動式終端 client。基本連線相容 Golang GoTTY；session 列表、writer 管理與遠端終止 PTY 則需要本專案的 js-gotty server。
+
+```sh
+# 連接預設 ws://127.0.0.1:8080/ws
+bun gotty.js --client
+
+# 連接 127.0.0.1:8081
+bun gotty.js --client 8081
+
+# 可使用 HTTP(S) 頁面網址或 WS(S) 網址
+bun gotty.js --client https://example.com/terminal/
+
+# 使用帳號密碼
+bun gotty.js --client -c user:pass 8081
+```
+
+連線後，第一個可寫入的 client 會成為 writer，其餘連線為唯讀 viewer。也可使用 `--readonly` 主動以 viewer 身分連線。client 會顯示 session 的 PID、reconnect token 與目前的 writer/viewer 權限。
+
+```sh
+# 使用 reconnect token 或 PID 接回既有 session
+bun gotty.js --client -r <token|pid> [target]
+
+# 列出目前 sessions
+bun gotty.js --client -ls [target]
+
+# 中斷目前 writer，但保留 PTY session
+bun gotty.js --client -d <token|pid> [target]
+
+# 終止對應的 PTY session
+bun gotty.js --client -k <token|pid> [target]
+```
+
+- `-r` 可接回既有 session；PID 查找是 js-gotty 擴充功能。
+- `-ls` 讀取 server 的 `/css.md` session 列表。
+- 使用瀏覽器查看 session 列表時請開啟 `/css`。
+- 如果 `/css` 顯示的是靜態檔案列表而不是 sessions，代表連線的是 Golang GoTTY，不是 js-gotty。
+- `-d` 需要 server 啟用 `--reconnect`，中斷 writer 後 session 仍保留，其他 client 可接手。
+- `-k` 會直接終止對應 PTY/session。
+- `--arg <value>` 可重複指定 command arguments；`--arguments <query>` 可傳入原始 query string。
+- `--cols`、`--rows` 可指定初始終端大小。
+- 可用 `GOTTY_CREDENTIAL` 與 `GOTTY_RECONNECT_TOKEN` 環境變數設定 credential 和 reconnect token。
+- Golang GoTTY 不支援 `-ls`、`-d`、`-k` 這些 js-gotty 控制協議。
+
 ### Wrapper
 - wgotty is a wrapper for Linux
 - or Windows with busybox64u.exe bash

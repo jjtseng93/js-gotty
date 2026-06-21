@@ -92,6 +92,51 @@ bun gotty.js --client
 - `--viu` starts `viu.mjs`
 - `--client` starts `client.mjs`
 
+### CLI Client
+
+`client.mjs` is an interactive terminal client that connects directly to GoTTY. Basic connections are compatible with Golang GoTTY. Session listing, writer management, and remote PTY termination require this project's js-gotty server.
+
+```sh
+# Connect to the default ws://127.0.0.1:8080/ws
+bun gotty.js --client
+
+# Connect to 127.0.0.1:8081
+bun gotty.js --client 8081
+
+# HTTP(S) page URLs and WS(S) URLs are accepted
+bun gotty.js --client https://example.com/terminal/
+
+# Connect with credentials
+bun gotty.js --client -c user:pass 8081
+```
+
+The first writable client becomes the writer, while additional connections are read-only viewers. Use `--readonly` to connect explicitly as a viewer. The client reports the session PID, reconnect token, and its current writer/viewer role.
+
+```sh
+# Resume an existing session by reconnect token or PID
+bun gotty.js --client -r <token|pid> [target]
+
+# List current sessions
+bun gotty.js --client -ls [target]
+
+# Disconnect the current writer while keeping the PTY session alive
+bun gotty.js --client -d <token|pid> [target]
+
+# Terminate the matching PTY session
+bun gotty.js --client -k <token|pid> [target]
+```
+
+- `-r` resumes an existing session; lookup by PID is a js-gotty extension.
+- `-ls` reads the server's `/css.md` session list.
+- Open `/css` to view the session list in a browser.
+- If `/css` shows a static file list instead of sessions, the server is Golang GoTTY, not js-gotty.
+- `-d` requires `--reconnect` on the server. The session remains alive after its writer is disconnected, allowing another client to take over.
+- `-k` terminates the matching PTY/session.
+- `--arg <value>` may be repeated to pass command arguments; `--arguments <query>` passes a raw query string.
+- `--cols` and `--rows` set the initial terminal size.
+- `GOTTY_CREDENTIAL` and `GOTTY_RECONNECT_TOKEN` may be used to configure credentials and the reconnect token.
+- Golang GoTTY does not support the js-gotty control protocols used by `-ls`, `-d`, and `-k`.
+
 ### Wrapper
 - `wgotty` is a wrapper for Linux
 - or for Windows with `busybox64u.exe bash`
