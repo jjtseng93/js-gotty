@@ -32,7 +32,7 @@ Target:
 Options:
   -r, --reconnect-token <token|pid> 
     Resume a session by token or PID
-  -d <token|pid>
+  -d, --detach <token|pid>
     Disconnect the active writer for a session and exit
   -ls                                
     List reconnectable sessions and exit
@@ -96,6 +96,7 @@ function parseArgs(argv) {
         options.reconnectToken = next();
         break;
       case "-d":
+      case "--detach":
         options.disconnectWriterTarget = next();
         break;
       case "-ls":
