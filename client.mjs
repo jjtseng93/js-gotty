@@ -26,7 +26,7 @@ function usage() {
 
 Target:
   Defaults to ${DEFAULT_URL}
-  A pure number is treated as a localhost port, for example 8080.
+  A pure number connects to 127.0.0.1 on that port, for example 8080.
   Accepts http(s) page URLs or ws(s) WebSocket URLs.
 
 Options:

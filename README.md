@@ -110,7 +110,7 @@ bun gotty.js --client https://example.com/terminal/
 bun gotty.js --client -c user:pass 8081
 ```
 
-連線後，第一個可寫入的 client 會成為 writer，其餘連線為唯讀 viewer。也可使用 `--readonly` 主動以 viewer 身分連線。client 會顯示 session 的 PID、reconnect token 與目前的 writer/viewer 權限。
+連線後，第一個可寫入的 client 會成為 writer，其餘連線為唯讀 viewer。也可使用 `--readonly` 主動以 viewer 身分連線。client 會顯示目前的 writer/viewer 權限；server 啟用 `--reconnect` 時，還會顯示 session PID 與 reconnect token。
 
 ```sh
 # 使用 reconnect token 或 PID 接回既有 session

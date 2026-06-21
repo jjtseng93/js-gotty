@@ -110,7 +110,7 @@ bun gotty.js --client https://example.com/terminal/
 bun gotty.js --client -c user:pass 8081
 ```
 
-The first writable client becomes the writer, while additional connections are read-only viewers. Use `--readonly` to connect explicitly as a viewer. The client reports the session PID, reconnect token, and its current writer/viewer role.
+The first writable client becomes the writer, while additional connections are read-only viewers. Use `--readonly` to connect explicitly as a viewer. The client reports its current writer/viewer role. When the server enables `--reconnect`, it also reports the session PID and reconnect token.
 
 ```sh
 # Resume an existing session by reconnect token or PID
