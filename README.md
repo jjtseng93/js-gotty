@@ -1,6 +1,10 @@
 # js-gotty / gotty.js
 
 ## News
+### 2026/06/22 - [1.0.0]
+- Added gotty cli client
+  * compatible with golang gotty
+  * jsgotty --client -h for more info
 ### 2026/04/23
 - Added optional noWinOpenUseFetch() at the frontend for Bun markdown TUI:
 - https://github.com/jjtseng93/bun-taskmgr

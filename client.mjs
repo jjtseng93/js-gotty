@@ -34,6 +34,8 @@ Options:
     Resume a session by token or PID
   -d, --detach <token|pid>
     Disconnect the active writer for a session and exit
+  -k, --kill <token|pid>
+    Terminate the session PTY for a token or PID
   -ls                                
     List reconnectable sessions and exit
   
@@ -68,7 +70,8 @@ function parseArgs(argv) {
     rows: 0,
     readonly: false,
     listSessions: false,
-    disconnectWriterTarget: ""
+    disconnectWriterTarget: "",
+    killSessionTarget: ""
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -98,6 +101,10 @@ function parseArgs(argv) {
       case "-d":
       case "--detach":
         options.disconnectWriterTarget = next();
+        break;
+      case "-k":
+      case "--kill":
+        options.killSessionTarget = next();
         break;
       case "-ls":
         options.listSessions = true;
@@ -250,8 +257,14 @@ Can't list sessions: older or Golang GoTTY servers do not support this feature`)
   }
 }
 
-async function disconnectWriter(options, wsUrl) {
-  const target = options.disconnectWriterTarget.trim();
+async function sendSessionControl(options, wsUrl, {
+  target,
+  request,
+  successMessage,
+  errorPrefix,
+  timeoutMessage,
+  unsupportedMessage,
+}) {
   await new Promise((resolve) => {
     const ws = new WebSocket(wsUrl, "webtty");
     let completed = false;
@@ -265,7 +278,7 @@ async function disconnectWriter(options, wsUrl) {
       resolve();
     };
     const timer = setTimeout(() => {
-      writeStatus("[gotty] writer disconnect request timed out");
+      writeStatus(timeoutMessage);
       finish(1);
       try {
         ws.close();
@@ -278,7 +291,7 @@ async function disconnectWriter(options, wsUrl) {
         AuthToken: options.credential,
         ReconnectToken: target,
         ReadOnly: true,
-        DisconnectWriter: true
+        ...request
       }));
     });
 
@@ -290,35 +303,63 @@ async function disconnectWriter(options, wsUrl) {
       try {
         const result = JSON.parse(text.slice(1));
         if (result.ok) {
-          writeStatus(`[gotty] ${result.message}
-reconnect token:
-  ${result.token}
-pid:
-  ${result.pid}`);
+          writeStatus(successMessage(result));
           finish(0);
         } else {
-          writeStatus(`[gotty] failed to disconnect writer:\n  ${result.message}`);
+          writeStatus(`${errorPrefix}\n  ${result.message}`);
           finish(1);
         }
       } catch (error) {
-        writeStatus(`[gotty] invalid writer disconnect response:\n  ${error.message}`);
+        writeStatus(`[gotty] invalid session control response:\n  ${error.message}`);
         finish(1);
       }
       ws.close();
     });
 
     ws.on("error", (error) => {
-      writeStatus(`[gotty] failed to disconnect writer:\n  ${error.message}`);
+      writeStatus(`${errorPrefix}\n  ${error.message}`);
       finish(1);
     });
 
     ws.on("close", (code, reason) => {
       if (!completed) {
         const detail = reason?.length ? `: ${reason.toString()}` : "";
-        writeStatus(`[gotty] server does not support writer disconnect (${code})${detail}`);
+        writeStatus(`${unsupportedMessage} (${code})${detail}`);
         finish(1);
       }
     });
+  });
+}
+
+async function disconnectWriter(options, wsUrl) {
+  const target = options.disconnectWriterTarget.trim();
+  return sendSessionControl(options, wsUrl, {
+    target,
+    request: { DisconnectWriter: true },
+    successMessage: (result) => `[gotty] ${result.message}
+reconnect token:
+  ${result.token}
+pid:
+  ${result.pid}`,
+    errorPrefix: "[gotty] failed to disconnect writer:",
+    timeoutMessage: "[gotty] writer disconnect request timed out",
+    unsupportedMessage: "[gotty] server does not support writer disconnect"
+  });
+}
+
+async function killSession(options, wsUrl) {
+  const target = options.killSessionTarget.trim();
+  return sendSessionControl(options, wsUrl, {
+    target,
+    request: { TerminateSession: true },
+    successMessage: (result) => `[gotty] ${result.message}
+pid:
+  ${result.pid}
+token:
+  ${result.token || "(none)"}`,
+    errorPrefix: "[gotty] failed to terminate session:",
+    timeoutMessage: "[gotty] session terminate request timed out",
+    unsupportedMessage: "[gotty] server does not support session terminate"
   });
 }
 
@@ -329,6 +370,9 @@ async function main() {
     cliArgs[0] = "-r";
   } else if (cliArgs[0] === "detach") {
     cliArgs[0] = "-d";
+  } else if (cliArgs[0] === "kill-session" ||
+      cliArgs[0] === "stop") {
+    cliArgs[0] = "-k";
   } else if (["ls", "list", "list-sessions"].includes(cliArgs[0])) {
     cliArgs[0] = "-ls";
   }
@@ -348,6 +392,10 @@ async function main() {
   }
   if (options.disconnectWriterTarget) {
     await disconnectWriter(options, wsUrl);
+    return;
+  }
+  if (options.killSessionTarget) {
+    await killSession(options, wsUrl);
     return;
   }
   const args = buildArguments(options, initArguments);

@@ -652,7 +652,8 @@ function parseInitMessage(raw) {
       ? parsed.ReconnectToken.trim()
       : "",
     ReadOnly: parsed.ReadOnly === true,
-    DisconnectWriter: parsed.DisconnectWriter === true
+    DisconnectWriter: parsed.DisconnectWriter === true,
+    TerminateSession: parsed.TerminateSession === true
   };
 }
 
@@ -2228,7 +2229,7 @@ function createServerRuntime(command, argv, options) {
   let acceptedOnce = false;
   let shuttingDown = false;
 
-  const findReconnectSession = (identifier) => {
+  const findSessionByIdentifier = (identifier) => {
     const value = String(identifier || "").trim();
     if (!value) {
       return null;
@@ -2239,18 +2240,25 @@ function createServerRuntime(command, argv, options) {
       return byToken;
     }
 
-    if (!/^\d+$/.test(value)) {
-      return null;
-    }
-    for (const candidate of reconnectRegistry.values()) {
-      if (
-        candidate &&
-        candidate.backend &&
-        String(candidate.backend.pid) === value &&
-        candidate.canResume(candidate.reconnectToken)
-      ) {
-        return candidate;
+    for (const session of activeSessions) {
+      if (!session || !session.backend) {
+        continue;
       }
+      if (String(session.backend.pid) === value) {
+        return session;
+      }
+      if (session.reconnectToken && session.reconnectToken === value) {
+        return session;
+      }
+    }
+
+    return null;
+  };
+
+  const findReconnectSession = (identifier) => {
+    const session = findSessionByIdentifier(identifier);
+    if (session && session.canResume(session.reconnectToken)) {
+      return session;
     }
     return null;
   };
@@ -2339,18 +2347,20 @@ function createServerRuntime(command, argv, options) {
 
     if (relativePath === "css.md" || relativePath === "css") {
       const sessions = [];
-      for (const [token, session] of reconnectRegistry) {
-        if (!session || !session.canResume(token)) {
+      for (const session of activeSessions) {
+        if (!session || !session.backend) {
           continue;
         }
-        const pid = session.backend && session.backend.pid
+        const pid = session.backend.pid
           ? String(session.backend.pid)
           : "無";
         const command = session.options && session.options.command
           ? path.basename(String(session.options.command))
           : "";
         const name = command.replace(/[\r\n\s]+/g, " ").trim() || "無";
-        const reconnectToken = String(token || "").replace(/[\r\n\s]+/g, "") || "無";
+        const reconnectToken = session.reconnectToken
+          ? String(session.reconnectToken).replace(/[\r\n\s]+/g, "")
+          : "";
         sessions.push({ pid, name, token: reconnectToken });
       }
       sessions.sort((left, right) => Number(left.pid) - Number(right.pid));
@@ -2364,14 +2374,23 @@ function createServerRuntime(command, argv, options) {
 
       const lines = [
         "# Current Session(s)",
-        "- Click on the links directly or with Ctrl+Click to reconnect to session",
-        "- Or use bun client.js -r pid",
+        ...(options.reconnect
+          ? [
+              "- Click on the links directly or with Ctrl+Click to reconnect to session",
+              "- Or use bun client.js -r pid"
+            ]
+          : [
+              "- Reconnect is disabled, so only PID and command name are shown"
+            ]),
         "## PID SESSION",
         ...(sessions.length > 0
           ? sessions.map((session) => {
               const name = session.name.replace(/([\\[\]])/g, "\\$1");
-              const reconnectUrl = `${publicOrigin}${basePath}?reconnect-token=${encodeURIComponent(session.token)}`;
-              return `- ${session.pid} [${name}](${reconnectUrl})`;
+              if (session.token) {
+                const reconnectUrl = `${publicOrigin}${basePath}?reconnect-token=${encodeURIComponent(session.token)}`;
+                return `- ${session.pid} [${name}](${reconnectUrl})`;
+              }
+              return `- ${session.pid} ${name}`;
             })
           : ["- 無 無"])
       ];
@@ -2565,6 +2584,35 @@ function createServerRuntime(command, argv, options) {
           } catch (error) {
             result.ok = false;
             result.message = `failed to disconnect writer: ${error.message}`;
+          }
+        }
+
+        ws.send(MSG_CONTROL_RESULT + JSON.stringify(result), () => {
+          ws.close(result.ok ? 1000 : 1008, result.message);
+        });
+        return;
+      }
+
+      if (init.TerminateSession) {
+        const existing = findSessionByIdentifier(init.ReconnectToken);
+        const result = existing
+          ? {
+              ok: true,
+              message: "session terminated",
+              token: existing.reconnectToken || "",
+              pid: existing.backend && existing.backend.pid ? existing.backend.pid : ""
+            }
+          : {
+              ok: false,
+              message: "session not found"
+            };
+
+        if (existing) {
+          try {
+            existing.close(1001, "terminated by remote request");
+          } catch (error) {
+            result.ok = false;
+            result.message = `failed to terminate session: ${error.message}`;
           }
         }
 
