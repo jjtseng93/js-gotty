@@ -16,6 +16,7 @@ const MSG_SET_PREFERENCES = "4";
 const MSG_SET_RECONNECT = "5";
 const MSG_SET_BUFFER_SIZE = "6";
 const MSG_SET_ROLE = "a";
+const MSG_CONTROL_RESULT = "b";
 
 const DEFAULT_URL = "ws://127.0.0.1:8080/ws";
 
@@ -31,6 +32,8 @@ Target:
 Options:
   -r, --reconnect-token <token|pid> 
     Resume a session by token or PID
+  -d <token|pid>
+    Disconnect the active writer for a session and exit
   -ls                                
     List reconnectable sessions and exit
   
@@ -64,7 +67,8 @@ function parseArgs(argv) {
     cols: 0,
     rows: 0,
     readonly: false,
-    listSessions: false
+    listSessions: false,
+    disconnectWriterTarget: ""
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -90,6 +94,9 @@ function parseArgs(argv) {
       case "-r":
       case "--reconnect-token":
         options.reconnectToken = next();
+        break;
+      case "-d":
+        options.disconnectWriterTarget = next();
         break;
       case "-ls":
         options.listSessions = true;
@@ -237,10 +244,84 @@ async function listSessions(options, wsUrl) {
   }
 }
 
+async function disconnectWriter(options, wsUrl) {
+  const target = options.disconnectWriterTarget.trim();
+  await new Promise((resolve) => {
+    const ws = new WebSocket(wsUrl, "webtty");
+    let completed = false;
+    const finish = (exitCode) => {
+      if (completed) {
+        return;
+      }
+      completed = true;
+      clearTimeout(timer);
+      process.exitCode = exitCode;
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      writeStatus("[gotty] writer disconnect request timed out");
+      try {
+        ws.close();
+      } catch {}
+      finish(1);
+    }, 5000);
+
+    ws.on("open", () => {
+      ws.send(JSON.stringify({
+        Arguments: "",
+        AuthToken: options.credential,
+        ReconnectToken: target,
+        ReadOnly: true,
+        DisconnectWriter: true
+      }));
+    });
+
+    ws.on("message", (data) => {
+      const text = Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
+      if (!text || text[0] !== MSG_CONTROL_RESULT) {
+        return;
+      }
+      try {
+        const result = JSON.parse(text.slice(1));
+        if (result.ok) {
+          writeStatus(`[gotty] ${result.message}
+reconnect token:
+  ${result.token}
+pid:
+  ${result.pid}`);
+          finish(0);
+        } else {
+          writeStatus(`[gotty] failed to disconnect writer:\n  ${result.message}`);
+          finish(1);
+        }
+      } catch (error) {
+        writeStatus(`[gotty] invalid writer disconnect response:\n  ${error.message}`);
+        finish(1);
+      }
+      ws.close();
+    });
+
+    ws.on("error", (error) => {
+      writeStatus(`[gotty] failed to disconnect writer:\n  ${error.message}`);
+      finish(1);
+    });
+
+    ws.on("close", (code, reason) => {
+      if (!completed) {
+        const detail = reason?.length ? `: ${reason.toString()}` : "";
+        writeStatus(`[gotty] server does not support writer disconnect (${code})${detail}`);
+        finish(1);
+      }
+    });
+  });
+}
+
 async function main() {
   const cliArgs = process.argv.slice(2);
   if (cliArgs[0] === "attach") {
     cliArgs[0] = "-r";
+  } else if (cliArgs[0] === "detach") {
+    cliArgs[0] = "-d";
   } else if (["ls", "list", "list-sessions"].includes(cliArgs[0])) {
     cliArgs[0] = "-ls";
   }
@@ -256,6 +337,10 @@ async function main() {
   }
   if (options.listSessions) {
     await listSessions(options, wsUrl);
+    return;
+  }
+  if (options.disconnectWriterTarget) {
+    await disconnectWriter(options, wsUrl);
     return;
   }
   const args = buildArguments(options, initArguments);

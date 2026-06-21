@@ -29,6 +29,7 @@ const MSG_SET_BUFFER_SIZE = "6";
 const MSG_KITTY_GRAPHICS = "7";
 const MSG_WINDOWS_BRIDGE = "9";
 const MSG_SET_ROLE = "a";
+const MSG_CONTROL_RESULT = "b";
 const KITTY_TRACE = process.env.KITTY_TRACE === "1";
 const WINDOWS_BRIDGE_TRACE = process.env.WINDOWS_BRIDGE_TRACE === "1";
 const WINDOWS_BRIDGE_PREFIX = Buffer.from("@@GOTTYCTL:", "ascii");
@@ -641,7 +642,8 @@ function parseInitMessage(raw) {
     ReconnectToken: typeof parsed.ReconnectToken === "string"
       ? parsed.ReconnectToken.trim()
       : "",
-    ReadOnly: parsed.ReadOnly === true
+    ReadOnly: parsed.ReadOnly === true,
+    DisconnectWriter: parsed.DisconnectWriter === true
   };
 }
 
@@ -1465,6 +1467,7 @@ class PtySession {
   constructor(options) {
     this.options = options;
     this.clients = new Map();
+    this.writerWs = null;
     this.log = options.log;
     this.permitWrite = options.permitWrite;
     this.columns = options.width || 0;
@@ -1570,6 +1573,9 @@ class PtySession {
       encoding: "null",
       readOnly
     });
+    if (this.permitWrite && !readOnly && !this.writerWs) {
+      this.writerWs = ws;
+    }
     this.sendSessionMetadata(ws, remoteAddr);
     this.startWebSocketHandlers(ws);
     this.notifyRoles();
@@ -1611,15 +1617,13 @@ class PtySession {
   }
 
   isWriter(ws) {
-    if (!this.permitWrite) {
-      return false;
-    }
-    for (const [clientWs, client] of this.clients) {
-      if (!client.readOnly) {
-        return clientWs === ws;
-      }
-    }
-    return false;
+    return this.writerSocket() === ws;
+  }
+
+  writerSocket() {
+    return this.writerWs && this.clients.has(this.writerWs)
+      ? this.writerWs
+      : null;
   }
 
   notifyRoles() {
@@ -2050,6 +2054,9 @@ class PtySession {
       if (!this.clients.has(ws) || this.closed) {
         return;
       }
+      if (this.writerWs === ws) {
+        this.writerWs = null;
+      }
       this.clients.delete(ws);
       if (this.clients.size > 0) {
         this.notifyRoles();
@@ -2178,6 +2185,7 @@ class PtySession {
 
     const clients = [...this.clients.keys()];
     this.clients.clear();
+    this.writerWs = null;
     for (const ws of clients) {
       try {
         ws.close(code || 1000, reason);
@@ -2210,6 +2218,33 @@ function createServerRuntime(command, argv, options) {
   const reconnectRegistry = new Map();
   let acceptedOnce = false;
   let shuttingDown = false;
+
+  const findReconnectSession = (identifier) => {
+    const value = String(identifier || "").trim();
+    if (!value) {
+      return null;
+    }
+
+    const byToken = reconnectRegistry.get(value);
+    if (byToken && byToken.canResume(byToken.reconnectToken)) {
+      return byToken;
+    }
+
+    if (!/^\d+$/.test(value)) {
+      return null;
+    }
+    for (const candidate of reconnectRegistry.values()) {
+      if (
+        candidate &&
+        candidate.backend &&
+        String(candidate.backend.pid) === value &&
+        candidate.canResume(candidate.reconnectToken)
+      ) {
+        return candidate;
+      }
+    }
+    return null;
+  };
 
   const counter = new Counter(options.timeout, () => {
     log("Timeout reached without active connections, shutting down");
@@ -2496,22 +2531,43 @@ function createServerRuntime(command, argv, options) {
         return;
       }
 
-      if (options.reconnect && init.ReconnectToken) {
-        let existing = reconnectRegistry.get(init.ReconnectToken);
-        if (!existing && /^\d+$/.test(init.ReconnectToken)) {
-          for (const candidate of reconnectRegistry.values()) {
-            if (
-              candidate &&
-              candidate.backend &&
-              String(candidate.backend.pid) === init.ReconnectToken &&
-              candidate.canResume(candidate.reconnectToken)
-            ) {
-              existing = candidate;
-              break;
+      if (init.DisconnectWriter) {
+        const existing = options.reconnect
+          ? findReconnectSession(init.ReconnectToken)
+          : null;
+        const writer = existing?.writerSocket();
+        const result = existing && writer
+          ? {
+              ok: true,
+              message: "writer disconnected",
+              token: existing.reconnectToken,
+              pid: existing.backend.pid
             }
+          : {
+              ok: false,
+              message: existing
+                ? "session has no active writer"
+                : "reconnect session not found"
+            };
+
+        if (writer) {
+          try {
+            writer.close(4001, "writer disconnected by remote request");
+          } catch (error) {
+            result.ok = false;
+            result.message = `failed to disconnect writer: ${error.message}`;
           }
         }
-        if (existing && existing.canResume(existing.reconnectToken)) {
+
+        ws.send(MSG_CONTROL_RESULT + JSON.stringify(result), () => {
+          ws.close(result.ok ? 1000 : 1008, result.message);
+        });
+        return;
+      }
+
+      if (options.reconnect && init.ReconnectToken) {
+        const existing = findReconnectSession(init.ReconnectToken);
+        if (existing) {
           const reconnectToken = existing.reconnectToken;
           log(`  Reconnect token: (resume)
   ${formatReconnectTokenForLog(reconnectToken)}
