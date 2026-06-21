@@ -28,6 +28,7 @@ const MSG_SET_RECONNECT = "5";
 const MSG_SET_BUFFER_SIZE = "6";
 const MSG_KITTY_GRAPHICS = "7";
 const MSG_WINDOWS_BRIDGE = "9";
+const MSG_SET_ROLE = "a";
 const KITTY_TRACE = process.env.KITTY_TRACE === "1";
 const WINDOWS_BRIDGE_TRACE = process.env.WINDOWS_BRIDGE_TRACE === "1";
 const WINDOWS_BRIDGE_PREFIX = Buffer.from("@@GOTTYCTL:", "ascii");
@@ -637,7 +638,10 @@ function parseInitMessage(raw) {
   return {
     Arguments: typeof parsed.Arguments === "string" ? parsed.Arguments : "",
     AuthToken: typeof parsed.AuthToken === "string" ? parsed.AuthToken : "",
-    ReconnectToken: typeof parsed.ReconnectToken === "string" ? parsed.ReconnectToken : ""
+    ReconnectToken: typeof parsed.ReconnectToken === "string"
+      ? parsed.ReconnectToken.trim()
+      : "",
+    ReadOnly: parsed.ReadOnly === true
   };
 }
 
@@ -1460,13 +1464,12 @@ function createPtyBackend(options) {
 class PtySession {
   constructor(options) {
     this.options = options;
-    this.ws = null;
+    this.clients = new Map();
     this.log = options.log;
     this.permitWrite = options.permitWrite;
     this.columns = options.width || 0;
     this.rows = options.height || 0;
     this.bufferSize = 1024;
-    this.encoding = "null";
     this.closed = false;
     this.backendExited = false;
     this.reconnectTimer = null;
@@ -1545,10 +1548,14 @@ class PtySession {
       this.terminate(1000, "process exited", { skipBackendClose: true });
     });
 
-    this.attachWebSocket(this.options.ws, this.options.remoteAddr || "");
+    this.attachWebSocket(
+      this.options.ws,
+      this.options.remoteAddr || "",
+      this.options.readOnly === true
+    );
   }
 
-  attachWebSocket(ws, remoteAddr = "") {
+  attachWebSocket(ws, remoteAddr = "", readOnly = false) {
     if (!ws || this.closed) {
       return false;
     }
@@ -1558,10 +1565,14 @@ class PtySession {
       this.reconnectTimer = null;
     }
 
-    this.ws = ws;
-    this.options.remoteAddr = remoteAddr;
-    this.sendSessionMetadata();
+    this.clients.set(ws, {
+      remoteAddr,
+      encoding: "null",
+      readOnly
+    });
+    this.sendSessionMetadata(ws, remoteAddr);
     this.startWebSocketHandlers(ws);
+    this.notifyRoles();
     return true;
   }
 
@@ -1575,26 +1586,49 @@ class PtySession {
     );
   }
 
-  sendSessionMetadata() {
+  sendSessionMetadata(ws, remoteAddr = "") {
     const title = renderTemplate(
       this.options.titleFormat,
       buildTitleVariables(
         this.options.command,
         this.options.argv,
         this.options.hostname,
-        this.options.remoteAddr,
+        remoteAddr,
         this.slaveVars
       )
     );
 
-    this.send(MSG_SET_WINDOW_TITLE, title);
-    this.send(MSG_SET_BUFFER_SIZE, JSON.stringify(this.bufferSize));
+    this.send(MSG_SET_WINDOW_TITLE, title, ws);
+    this.send(MSG_SET_BUFFER_SIZE, JSON.stringify(this.bufferSize), ws);
 
     if (this.options.reconnect) {
       this.send(MSG_SET_RECONNECT, JSON.stringify({
         time: this.options.reconnectTime,
-        token: this.reconnectToken
-      }));
+        token: this.reconnectToken,
+        pid: this.backend.pid
+      }), ws);
+    }
+  }
+
+  isWriter(ws) {
+    if (!this.permitWrite) {
+      return false;
+    }
+    for (const [clientWs, client] of this.clients) {
+      if (!client.readOnly) {
+        return clientWs === ws;
+      }
+    }
+    return false;
+  }
+
+  notifyRoles() {
+    for (const ws of this.clients.keys()) {
+      const writable = this.isWriter(ws);
+      this.send(MSG_SET_ROLE, JSON.stringify({
+        role: writable ? "writer" : "viewer",
+        writable
+      }), ws);
     }
   }
 
@@ -1997,22 +2031,30 @@ class PtySession {
 
   startWebSocketHandlers(ws) {
     ws.on("message", (message, isBinary) => {
-      if (this.closed || ws !== this.ws || isBinary) {
+      if (this.closed || !this.clients.has(ws) || isBinary) {
         return;
       }
       try {
-        this.handleClientMessage(message.toString("utf8"));
+        this.handleClientMessage(ws, message.toString("utf8"));
       } catch (error) {
         this.log(`WS session error: ${error.message}`);
-        this.terminate(1011, error.message);
+        try {
+          ws.close(1011, error.message);
+        } catch (closeError) {
+          // The client socket is already gone.
+        }
       }
     });
 
     const handleSocketGone = () => {
-      if (ws !== this.ws || this.closed) {
+      if (!this.clients.has(ws) || this.closed) {
         return;
       }
-      this.ws = null;
+      this.clients.delete(ws);
+      if (this.clients.size > 0) {
+        this.notifyRoles();
+        return;
+      }
       if (this.options.reconnect && !this.backendExited) {
         this.armReconnectTimeout();
         return;
@@ -2024,36 +2066,40 @@ class PtySession {
     ws.once("error", handleSocketGone);
   }
 
-  handleClientMessage(data) {
+  handleClientMessage(ws, data) {
     if (!data || data.length === 0) {
       throw new Error("unexpected zero length read from master");
     }
 
     const type = data[0];
     const payload = data.slice(1);
+    const client = this.clients.get(ws);
+    if (!client) {
+      return;
+    }
 
     switch (type) {
       case MSG_INPUT:
-        if (!this.permitWrite || payload.length === 0) {
+        if (!this.isWriter(ws) || payload.length === 0) {
           return;
         }
-        if (this.encoding === "base64") {
+        if (client.encoding === "base64") {
           this.backend.write(Buffer.from(payload, "base64"));
         } else {
           this.backend.write(Buffer.from(payload, "utf8"));
         }
         break;
       case MSG_INPUT_BINARY:
-        if (!this.permitWrite || payload.length === 0) {
+        if (!this.isWriter(ws) || payload.length === 0) {
           return;
         }
         this.backend.writeBinary(Buffer.from(payload, "base64"));
         break;
       case MSG_PING:
-        this.send(MSG_PONG, "");
+        this.send(MSG_PONG, "", ws);
         break;
       case MSG_WINDOWS_BRIDGE: {
-        if (!this.supportsWindowsBridge || !this.permitWrite || payload.length === 0) {
+        if (!this.supportsWindowsBridge || !this.isWriter(ws) || payload.length === 0) {
           return;
         }
         let message;
@@ -2070,11 +2116,11 @@ class PtySession {
       }
       case MSG_SET_ENCODING:
         if (payload === "base64" || payload === "null") {
-          this.encoding = payload;
+          client.encoding = payload;
         }
         break;
       case MSG_RESIZE_TERMINAL: {
-        if (this.columns !== 0 && this.rows !== 0) {
+        if (!this.isWriter(ws) || (this.columns !== 0 && this.rows !== 0)) {
           return;
         }
         let args;
@@ -2096,9 +2142,18 @@ class PtySession {
     }
   }
 
-  send(type, payload) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(type + payload);
+  send(type, payload, targetWs = null) {
+    if (targetWs) {
+      if (this.clients.has(targetWs) && targetWs.readyState === WebSocket.OPEN) {
+        targetWs.send(type + payload);
+      }
+      return;
+    }
+
+    for (const ws of this.clients.keys()) {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(type + payload);
+      }
     }
   }
 
@@ -2121,9 +2176,9 @@ class PtySession {
       this.backend.close();
     }
 
-    const ws = this.ws;
-    this.ws = null;
-    if (ws) {
+    const clients = [...this.clients.keys()];
+    this.clients.clear();
+    for (const ws of clients) {
       try {
         ws.close(code || 1000, reason);
       } catch (error) {
@@ -2235,6 +2290,43 @@ function createServerRuntime(command, argv, options) {
         "Server": "GoTTY"
       });
       res.end(lines.join("\n"));
+      return;
+    }
+
+    if (relativePath === "css.md") {
+      const sessions = [];
+      for (const [token, session] of reconnectRegistry) {
+        if (!session || !session.canResume(token)) {
+          continue;
+        }
+        const pid = session.backend && session.backend.pid
+          ? String(session.backend.pid)
+          : "無";
+        const command = session.options && session.options.command
+          ? path.basename(String(session.options.command))
+          : "";
+        const name = command.replace(/[\r\n\s]+/g, " ").trim() || "無";
+        const reconnectToken = String(token || "").replace(/[\r\n\s]+/g, "") || "無";
+        sessions.push({ pid, name, token: reconnectToken });
+      }
+      sessions.sort((left, right) => Number(left.pid) - Number(right.pid));
+
+      const lines = [
+        "# Session list",
+        "# PID SESSION",
+        ...(sessions.length > 0
+          ? sessions.map((session) => {
+              const name = session.name.replace(/([\\[\]])/g, "\\$1");
+              const reconnectUrl = `${basePath}?reconnect-token=${encodeURIComponent(session.token)}`;
+              return `- ${session.pid} [${name}](${reconnectUrl})`;
+            })
+          : ["- 無 無"])
+      ];
+      res.writeHead(200, {
+        "Content-Type": "text/markdown; charset=utf-8",
+        "Server": "GoTTY"
+      });
+      res.end(`${lines.join("\n")}\n`);
       return;
     }
 
@@ -2388,13 +2480,31 @@ function createServerRuntime(command, argv, options) {
       }
 
       if (options.reconnect && init.ReconnectToken) {
-        const existing = reconnectRegistry.get(init.ReconnectToken);
-        if (existing && existing.canResume(init.ReconnectToken)) {
+        let existing = reconnectRegistry.get(init.ReconnectToken);
+        if (!existing && /^\d+$/.test(init.ReconnectToken)) {
+          for (const candidate of reconnectRegistry.values()) {
+            if (
+              candidate &&
+              candidate.backend &&
+              String(candidate.backend.pid) === init.ReconnectToken &&
+              candidate.canResume(candidate.reconnectToken)
+            ) {
+              existing = candidate;
+              break;
+            }
+          }
+        }
+        if (existing && existing.canResume(existing.reconnectToken)) {
+          const reconnectToken = existing.reconnectToken;
           log(`  Reconnect token: (resume)
-  ${formatReconnectTokenForLog(init.ReconnectToken)}
+  ${formatReconnectTokenForLog(reconnectToken)}
 `);
           session = existing;
-          session.attachWebSocket(ws, req.socket.remoteAddress || "");
+          session.attachWebSocket(
+            ws,
+            req.socket.remoteAddress || "",
+            init.ReadOnly
+          );
           return;
         }
       }
@@ -2420,6 +2530,7 @@ function createServerRuntime(command, argv, options) {
           argv: [...argv, ...clientArgs],
           headerEnv,
           remoteAddr: req.socket.remoteAddress || "",
+          readOnly: init.ReadOnly,
           hostname,
           titleFormat: options.titleFormat,
           permitWrite: options.permitWrite,
@@ -2471,6 +2582,7 @@ function createServerRuntime(command, argv, options) {
 
   function logUrls() {
     const scheme = options.tls ? "https" : "http";
+    const accessMode = options.permitWrite ? "writable" : "read-only";
     const address = server.address();
     if (!address || typeof address === "string") {
       return;
@@ -2479,7 +2591,35 @@ function createServerRuntime(command, argv, options) {
     const formattedHost = net.isIPv6(host) ? `[${host}]` : host;
     log(`HTTP server is listening at: 
     ${scheme}://${formattedHost}:${address.port}${basePath}
+  Access mode: ${accessMode}
 `);
+    const hasCustomPath = normalizeBasePath(options.path) !== "/";
+    const customPathValue = normalizeBasePath(options.path)
+      .replace(/^\/+|\/+$/g, "");
+    if (
+      hasCustomPath &&
+      !options.randomUrl &&
+      customPathValue.length < 16
+    ) {
+      log(`SECURITY NOTICE:
+  The custom path is only ${customPathValue.length} characters long.
+  Use at least 16 randomly generated characters to make URL guessing harder.
+  A custom path is not a substitute for --credential and TLS.
+`);
+    }
+    if (
+      options.permitWrite &&
+      !options.credential &&
+      !options.randomUrl &&
+      !hasCustomPath
+    ) {
+      log(`SECURITY WARNING:
+  This writable terminal has no credential, random URL, or custom path.
+  Anyone who can reach this server may execute arbitrary commands (ACE)
+  with the same permissions as the GoTTY process.
+  Enable --credential, --random-url, or at minimum use a non-default --path.
+`);
+    }
     if (options.address === "0.0.0.0") {
       try {
         const interfaces = os.networkInterfaces();

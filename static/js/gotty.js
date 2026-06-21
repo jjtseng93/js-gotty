@@ -30976,9 +30976,13 @@
           window.location.pathname +
           "ws" +
           o,
-        l = window.location.search,
+        l = new URLSearchParams(window.location.search),
+        u = l.get("reconnect-token") || "";
+      l.delete("reconnect-token");
+      const g = l.toString(),
         c = new e.ConnectionFactory(a, t.protocols),
-        d = new t.WebTTY(n, c, l, gotty_auth_token);
+        d = new t.WebTTY(n, c, "" === g ? "" : "?" + g, gotty_auth_token);
+      d.reconnectToken = u;
       if ("undefined" != typeof window) {
         window.__gottyXterm = s.__gottyXterm || null;
         window.__gottyWebTTY = d;
