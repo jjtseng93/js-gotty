@@ -1,10 +1,14 @@
 # js-gotty / gotty.js
 
+[English README](README.en.md)
+
 ## News
 ### 2026/06/22 - [1.0.0]
 - Added gotty cli client
   * compatible with golang gotty
   * jsgotty --client -h for more info
+- Added /css to list sessions
+  * when --reconnect enabled, /css can reconnect to existing sessions
 ### 2026/04/23
 - Added optional noWinOpenUseFetch() at the frontend for Bun markdown TUI:
 - https://github.com/jjtseng93/bun-taskmgr
@@ -74,6 +78,20 @@ bun gotty.js
 bun gotty.js -h
 ```
 
+### Built-in tools
+
+```sh
+bun gotty.js --rz
+bun gotty.js --sz
+bun gotty.js --viu
+bun gotty.js --client
+```
+
+- `--rz` starts `rz.js`
+- `--sz` starts `sz.js`
+- `--viu` starts `viu.mjs`
+- `--client` starts `client.mjs`
+
 ### Wrapper
 - wgotty is a wrapper for Linux
 - or Windows with busybox64u.exe bash
@@ -110,6 +128,7 @@ bun gotty.js -h
   * overlay 會提供 `Reconnect` 按鈕，可手動立即重試
   * 該按鈕右鍵/長按可輸入自訂reconnect token
 - 目前 reconnect 是「接回現有 shell」，不是「回放斷線期間所有輸出」。斷線期間的輸出不會補送。
+- `--reconnect` 關閉時，`/css` 與 `/css.md` 仍會顯示 PID / command name，只是不會提供 reconnect token 與連結。
 
 ### Kitty intro
 - 只要終端程式使用 Kitty Graphics Protocol (Linux) 輸出圖片，前端就會把圖片顯示在終端對應位置。
