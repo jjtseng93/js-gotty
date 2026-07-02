@@ -72,11 +72,21 @@ const DEFAULT_HELP = path.join(STATIC_ROOT, "help.md");
 
 let cliBootstrapPromise = null;
 for (const i of ["rz.js", "sz.js", "viu.mjs", "client.mjs"]) {
-  if (process.argv[2] === `--${i.split(".")[0]}`) {
+  let subcmd = i.split(".")[0] ;
+  if (process.argv[2] === `--${subcmd}`) {
     process.argv.splice(2, 1);
     process.argv[1] = process.argv[1].replace(/gotty\.js$/, i);
     cliBootstrapPromise = (async () => {
-      await import(`./${i}`);
+    
+      if(subcmd=="rz")
+        await import("./rz.js");
+      else if(subcmd=="sz")
+        await import("./sz.js");
+      else if(subcmd=="viu")
+        await import("./viu.mjs");
+      else if(subcmd=="client")
+        await import("./client.mjs");
+        
     })().catch((error) => {
       console.error(String(error && error.stack ? error.stack : error));
       process.exitCode = 1;
@@ -1497,6 +1507,11 @@ class BunPtyBackend {
 
 function createPtyBackend(options) {
   if (process.platform === "win32") {
+    if (globalThis.Bun?.semver?.satisfies?.(
+        globalThis.Bun?.version, ">=1.3.14"
+      )) {
+      return new BunPtyBackend(options);
+    }
     return new NodePtyBackend(options);
   }
 
