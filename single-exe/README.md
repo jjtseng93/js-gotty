@@ -67,3 +67,16 @@ await compiledHelper?.buildEarlyExit?.(process.argv, "my-bin");
 - `--build-exe` builds with no Bun target.
 - `--build-for <target>` passes `<target>` to `bun build --target=<target>`.
 - The second argument is the output filename. If omitted, it defaults to `single.exe`.
+
+The main program should also switch its repo/resource root when running as a
+compiled binary. Use `isCompiledBinary()` and `resolveCompiledBaseDir()` from
+`compiled.js`; when compiled, treat the executable directory as the repo root
+used for external fallback files such as `static/`, `README.md`, or other files
+packed by `packAssets.sh`.
+
+```js
+const compiledHelper = await import("./single-exe/compiled.js").catch(() => null);
+const repoRoot = compiledHelper?.isCompiledBinary?.()
+  ? compiledHelper.resolveCompiledBaseDir()
+  : import.meta.dirname;
+```

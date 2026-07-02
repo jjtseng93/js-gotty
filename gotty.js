@@ -65,18 +65,31 @@ const DEFAULTS = {
   closeTimeout: -1
 };
 
-const STATIC_ROOT = path.resolve(__dirname, "./static");
-const DEFAULT_INDEX = path.join(STATIC_ROOT, "index.html");
-const DEFAULT_MANIFEST = path.join(STATIC_ROOT, "manifest.json");
-const DEFAULT_HELP = path.join(STATIC_ROOT, "help.md");
-const DEFAULT_README = path.resolve(__dirname, "./README.md");
-const DEFAULT_README_EN = path.resolve(__dirname, "./README.en.md");
 const compiledHelperPromise = import("./single-exe/compiled.js").catch(() => null);
 const assetsHelperPromise = import("./single-exe/assetsHelper.js").catch(() => null);
 
+let RESOURCE_ROOT = __dirname;
+let STATIC_ROOT = path.resolve(RESOURCE_ROOT, "./static");
+let DEFAULT_INDEX = path.join(STATIC_ROOT, "index.html");
+let DEFAULT_MANIFEST = path.join(STATIC_ROOT, "manifest.json");
+let DEFAULT_HELP = path.join(STATIC_ROOT, "help.md");
+let DEFAULT_README = path.resolve(RESOURCE_ROOT, "./README.md");
+let DEFAULT_README_EN = path.resolve(RESOURCE_ROOT, "./README.en.md");
 let helperAssetPath = null;
 let helperReadInternalAssetText = null;
 let helperReadInternalAssetBytes = null;
+
+function configureResourceRoot(compiledHelper) {
+  RESOURCE_ROOT = compiledHelper?.isCompiledBinary?.(process.argv)
+    ? compiledHelper.resolveCompiledBaseDir({ argv: process.argv })
+    : __dirname;
+  STATIC_ROOT = path.resolve(RESOURCE_ROOT, "./static");
+  DEFAULT_INDEX = path.join(STATIC_ROOT, "index.html");
+  DEFAULT_MANIFEST = path.join(STATIC_ROOT, "manifest.json");
+  DEFAULT_HELP = path.join(STATIC_ROOT, "help.md");
+  DEFAULT_README = path.resolve(RESOURCE_ROOT, "./README.md");
+  DEFAULT_README_EN = path.resolve(RESOURCE_ROOT, "./README.en.md");
+}
 
 let cliBootstrapPromise = null;
 for (const i of ["rz.js", "sz.js", "viu.mjs", "client.mjs"]) {
@@ -1305,7 +1318,8 @@ class NodePtyBackend {
   constructor(options) {
     let nodePty;
     try {
-      nodePty = require("./lib/node-pty");
+      let preventSingleExe="./lib/"
+      nodePty = require(preventSingleExe+"node-pty");
     } catch (error) {
       throw new Error("node-pty is required on Windows but is not installed");
     }
@@ -3001,6 +3015,7 @@ function main() {
 async function bootstrap() {
   try {
     const compiledHelper = await compiledHelperPromise;
+    configureResourceRoot(compiledHelper);
     await compiledHelper?.buildEarlyExit?.(process.argv,'jsgt');
 
     const assetsHelper = await assetsHelperPromise;
