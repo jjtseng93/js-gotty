@@ -688,9 +688,7 @@ pid:
   });
 }
 
-try {
-  await main();
-} catch (error) {
+main().catch((error) => {
   console.error(`client.mjs: ${error.message}`);
-  process.exit(1);
-}
+  process.exitCode = 1;
+});
