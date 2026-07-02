@@ -12619,7 +12619,7 @@
           }
           setPreferences(e) {
             Object.keys(e).forEach((t) => {
-              "EnableWebGL" == t && t
+	              "EnableWebGL" == t && e[t]
                 ? this.term.loadAddon(new o.WebglAddon())
                 : "font-size" == t
                   ? (this.term.options.fontSize =
@@ -31012,6 +31012,12 @@
       const urlParams = new URLSearchParams(window.location.search);
       const reconnectToken = urlParams.get("reconnect-token") || "";
       const startupPrefs = {};
+      if (
+        "undefined" != typeof window &&
+        window.gotty_enable_webgl === true
+      ) {
+        startupPrefs.EnableWebGL = !0;
+      }
       const fontFamily = urlParams.get("font-family");
       if (fontFamily) {
         startupPrefs["font-family"] = fontFamily;
@@ -31023,8 +31029,29 @@
           startupPrefs["font-size"] = parsedFontSize;
         }
       }
+      const webgl = urlParams.get("webgl");
+      if (webgl) {
+        const normalizedWebgl = webgl.trim().toLowerCase();
+        if (["on", "true", "1"].includes(normalizedWebgl)) {
+          startupPrefs.EnableWebGL = !0;
+        } else if (["off", "false", "0"].includes(normalizedWebgl)) {
+          delete startupPrefs.EnableWebGL;
+        }
+      }
+      const touchScrollThreshold = urlParams.get("touch-scroll-threshold");
+      if (touchScrollThreshold) {
+        const parsedTouchScrollThreshold = Number(touchScrollThreshold);
+        if (
+          Number.isFinite(parsedTouchScrollThreshold) &&
+          parsedTouchScrollThreshold > 0
+        ) {
+          window.touchScrollThreshold = parsedTouchScrollThreshold;
+        }
+      }
       urlParams.delete("font-family");
       urlParams.delete("font-size");
+      urlParams.delete("webgl");
+      urlParams.delete("touch-scroll-threshold");
       n = new r.GoTTYXterm(s, startupPrefs);
       if ("undefined" != typeof window) {
         window.__gottyTerminal = n;

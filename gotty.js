@@ -59,6 +59,7 @@ const DEFAULTS = {
   height: 0,
   wsOrigin: "",
   wsQueryArgs: "",
+  webgl: false,
   quiet: false,
   closeSignal: "SIGINT",
   closeTimeout: -1
@@ -67,6 +68,7 @@ const DEFAULTS = {
 const STATIC_ROOT = path.resolve(__dirname, "./static");
 const DEFAULT_INDEX = path.join(STATIC_ROOT, "index.html");
 const DEFAULT_MANIFEST = path.join(STATIC_ROOT, "manifest.json");
+const DEFAULT_HELP = path.join(STATIC_ROOT, "help.md");
 
 let cliBootstrapPromise = null;
 for (const i of ["rz.js", "sz.js", "viu.mjs", "client.mjs"]) {
@@ -165,6 +167,9 @@ Options:
     Adds a fixed query string to the WebSocket URL
     Format: keyA=valA&keyB=valB
     (default: empty)
+
+  --webgl                       Enable xterm WebGL renderer
+    (default: disabled)
     
   --quiet                       Disable logging
     (default: log to stderr)
@@ -174,7 +179,20 @@ Options:
   --close-timeout <value>       Seconds before force kill after ${DEFAULTS.closeSignal}
     (default: -1 (disabled) )
     
-  --help, -h                    Show help`);
+  --help-web                    Show help for WebUI frontend
+  --help, -h                    Show help for CLI`);
+}
+
+function printWebHelp() {
+  const text = readTextFile(DEFAULT_HELP);
+  const markdownAnsi =
+    typeof Bun !== "undefined" &&
+    Bun &&
+    Bun.markdown &&
+    typeof Bun.markdown.ansi === "function"
+      ? Bun.markdown.ansi
+      : null;
+  console.log(markdownAnsi ? markdownAnsi(text) : text);
 }
 
 function fatal(message, code = 1) {
@@ -423,6 +441,10 @@ function parseArgs(argv) {
         printUsage();
         process.exit(0);
         break;
+      case "--help-web":
+        printWebHelp();
+        process.exit(0);
+        break;
       case "--address":
       case "-a":
         options.address = next();
@@ -498,6 +520,9 @@ function parseArgs(argv) {
         break;
       case "--ws-query-args":
         options.wsQueryArgs = next();
+        break;
+      case "--webgl":
+        options.webgl = true;
         break;
       case "--quiet":
         options.quiet = true;
@@ -2392,6 +2417,7 @@ function createServerRuntime(command, argv, options) {
       const lines = [
         "var gotty_term = 'xterm';",
         `var gotty_ws_query_args = ${JSON.stringify(options.wsQueryArgs)};`,
+        `var gotty_enable_webgl = ${options.webgl ? "true" : "false"};`,
         `var gotty_kitty_trace = ${KITTY_TRACE ? "true" : "false"};`
       ];
       res.writeHead(200, {
@@ -2399,6 +2425,23 @@ function createServerRuntime(command, argv, options) {
         "Server": "GoTTY"
       });
       res.end(lines.join("\n"));
+      return;
+    }
+
+    if (relativePath === "help.md" || relativePath === "help") {
+      const markdown = readTextFile(DEFAULT_HELP);
+      const markdownToHtml = global.Bun?.markdown?.html;
+      const renderHtml = relativePath === "help" && typeof markdownToHtml === "function";
+      const body = renderHtml
+        ? markdownToHtml(markdown)
+        : markdown;
+      res.writeHead(200, {
+        "Content-Type": renderHtml
+          ? "text/html; charset=utf-8"
+          : "text/markdown; charset=utf-8",
+        "Server": "GoTTY"
+      });
+      res.end(body);
       return;
     }
 
