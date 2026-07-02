@@ -12454,18 +12454,42 @@
           zmodemAddon;
           toServer;
           encoder;
-          reconnectAction;
-          constructor(e) {
-            ((this.elem = e),
-              (this.term = new r.Terminal()),
-              (this.fitAddOn = new s.FitAddon()),
-              (this.zmodemAddon = new a.ZModemAddon({
-                toTerminal: (e) => this.term.write(e),
-                toServer: (e) => this.sendInput(e),
-              })),
-              this.term.loadAddon(new n.WebLinksAddon()),
-              this.term.loadAddon(this.fitAddOn),
-              this.term.loadAddon(this.zmodemAddon),
+	          reconnectAction;
+	          constructor(e) {
+	            ((this.elem = e),
+	              (this.term = new r.Terminal({
+	                allowProposedApi: !0,
+	                customGlyphs: !0,
+	                rescaleOverlappingGlyphs: !0,
+	              })),
+	              (this.fitAddOn = new s.FitAddon()),
+	              (this.zmodemAddon = new a.ZModemAddon({
+	                toTerminal: (e) => this.term.write(e),
+	                toServer: (e) => this.sendInput(e),
+	              })),
+	              (() => {
+	                try {
+	                  const e = globalThis.Unicode11Addon;
+	                  const t =
+	                    e && "function" == typeof e
+	                      ? e
+	                      : e && "function" == typeof e.Unicode11Addon
+	                        ? e.Unicode11Addon
+	                        : null;
+	                  if (!t) return;
+	                  const s = new t();
+	                  this.term.loadAddon(s),
+	                    (this.term.unicode.activeVersion = "11");
+	                } catch (e) {
+	                  console.warn(
+	                    "Unicode11 addon failed to load, using the default width table",
+	                    e,
+	                  );
+	                }
+	              })(),
+	              this.term.loadAddon(new n.WebLinksAddon()),
+	              this.term.loadAddon(this.fitAddOn),
+	              this.term.loadAddon(this.zmodemAddon),
               (e.__gottyXterm = this.term),
               (window.getTerminalText = () => {
                 const e = this.term.buffer.active;
