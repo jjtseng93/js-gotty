@@ -9,6 +9,7 @@
 - Frontend help by `--help-web`
 - Added `font-size` and `font-family`
 - Added `touch-scroll-threshold` for fast scrolling
+- Added experimental single-exe build commands: `--build-exe` and `--build-for <target>`
 
 ### 2026/06/22 - [1.0.0]
 - Added gotty cli client

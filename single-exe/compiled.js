@@ -1,6 +1,7 @@
 import { basename, dirname, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import child_process from "node:child_process";
 
 
 const IS_COMPILED = isCompiledBinary(process.argv);
@@ -69,6 +70,7 @@ export async function buildExecutable(target = "",build_outfile="single.exe") {
   ];
 
   for (const step of steps) {
+  
     console.log('');
     console.log(Bun?.markdown?.ansi?.('## '+step.label)||step.label);
   
@@ -82,11 +84,52 @@ export async function buildExecutable(target = "",build_outfile="single.exe") {
     console.log(Bun?.markdown?.ansi?.(
       '- Status: '+result.status+' for '+step.label
     )||result.status);
+
+
+
+    if (result.error || result.status !== 0) {
+      if (result.error) {
+        console.error(result.error);
+      }
+      if (step.label !== "Pack assets") {
+        return result.status ?? 1;
+      }
+      console.log("Pack assets failed; continuing with the existing assets.tar if available");
+    }
+    
     
   }
 
   if(await Bun.file(outfile).exists())
+  {
     console.log(`Built executable: ${outfile}`);
+    return 0;
+  }
   else
+  {
     console.log(`Error while building executable: ${outfile}`);
+    return 1;
+  }
+}
+
+export const buildExe = buildExecutable;
+
+export async function buildEarlyExit(argv = process.argv,build_outfile) {
+  const buildExeIndex = argv.indexOf("--build-exe");
+  const buildForIndex = argv.indexOf("--build-for");
+
+  if (buildExeIndex === -1 && buildForIndex === -1) {
+    return false;
+  }
+
+  if (buildForIndex !== -1) {
+    const target = argv[buildForIndex + 1];
+    if (!target || target.startsWith("-")) {
+      console.error("Missing value for --build-for");
+      process.exit(2);
+    }
+    process.exit(await buildExe(target,build_outfile));
+  }
+
+  process.exit(await buildExe(null,build_outfile));
 }

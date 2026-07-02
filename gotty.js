@@ -71,6 +71,12 @@ const DEFAULT_MANIFEST = path.join(STATIC_ROOT, "manifest.json");
 const DEFAULT_HELP = path.join(STATIC_ROOT, "help.md");
 const DEFAULT_README = path.resolve(__dirname, "./README.md");
 const DEFAULT_README_EN = path.resolve(__dirname, "./README.en.md");
+const compiledHelperPromise = import("./single-exe/compiled.js").catch(() => null);
+const assetsHelperPromise = import("./single-exe/assetsHelper.js").catch(() => null);
+
+let helperAssetPath = null;
+let helperReadInternalAssetText = null;
+let helperReadInternalAssetBytes = null;
 
 let cliBootstrapPromise = null;
 for (const i of ["rz.js", "sz.js", "viu.mjs", "client.mjs"]) {
@@ -194,7 +200,11 @@ Options:
   --help-web                    Show help for WebUI frontend
   --readme                      Show README.md and exit
   --readme-en                   Show README.en.md and exit
-  --help, -h                    Show help for CLI`);
+  --help, -h                    Show help for CLI
+
+Experimental:
+  --build-exe                   Build a Bun single-file executable and exit
+  --build-for <target>          Build a Bun single-file executable for target`);
 }
 
 function printMarkdownFile(filePath) {
@@ -614,7 +624,33 @@ function previewBuffer(buffer, limit = 96) {
 }
 
 function readTextFile(filePath) {
-  return fs.readFileSync(filePath, "utf8");
+  const bundledText = helperReadInternalAssetText?.(internalAssetPathFor(filePath));
+  if (bundledText == null) {
+    return fs.readFileSync(filePath, "utf8");
+  }
+  return bundledText;
+}
+
+function internalAssetPathFor(filePath) {
+  if (!helperAssetPath) {
+    return filePath;
+  }
+
+  const normalizedPath = path.normalize(filePath);
+  const staticRelativePath = path.relative(STATIC_ROOT, normalizedPath);
+  if (staticRelativePath && !staticRelativePath.startsWith("..") && !path.isAbsolute(staticRelativePath)) {
+    return helperAssetPath("static", staticRelativePath);
+  }
+
+  if (normalizedPath === DEFAULT_README) {
+    return helperAssetPath("README.md");
+  }
+
+  if (normalizedPath === DEFAULT_README_EN) {
+    return helperAssetPath("README.en.md");
+  }
+
+  return filePath;
 }
 
 function contentType(filePath) {
@@ -2548,6 +2584,18 @@ function createServerRuntime(command, argv, options) {
       return;
     }
 
+    const bundledAsset = helperReadInternalAssetBytes?.(internalAssetPathFor(assetPath));
+    if (bundledAsset != null) {
+      const body = bundledAsset instanceof Uint8Array ? bundledAsset : new Uint8Array(bundledAsset);
+      res.writeHead(200, {
+        "Content-Type": contentType(assetPath),
+        "Content-Length": body.length,
+        "Server": "GoTTY"
+      });
+      res.end(body);
+      return;
+    }
+
     fs.stat(assetPath, (error, stats) => {
       if (error || !stats.isFile()) {
         res.writeHead(404, { "Server": "GoTTY" });
@@ -2950,6 +2998,28 @@ function main() {
   runtime.start();
 }
 
-if (!cliBootstrapPromise) {
-  main();
+async function bootstrap() {
+  try {
+    const compiledHelper = await compiledHelperPromise;
+    await compiledHelper?.buildEarlyExit?.(process.argv,'jsgt');
+
+    const assetsHelper = await assetsHelperPromise;
+    if (assetsHelper) {
+      helperAssetPath = assetsHelper.assetPath;
+      helperReadInternalAssetText = assetsHelper.readInternalAssetText;
+      helperReadInternalAssetBytes = assetsHelper.readInternalAssetBytes;
+    }
+    await globalThis.assetsLoaderPromise;
+  } catch (error) {
+    console.error(String(error && error.stack ? error.stack : error));
+  }
+
+  if (!cliBootstrapPromise) {
+    main();
+  }
 }
+
+bootstrap().catch((error) => {
+  console.error(String(error && error.stack ? error.stack : error));
+  process.exitCode = 1;
+});
