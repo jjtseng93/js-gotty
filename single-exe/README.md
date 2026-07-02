@@ -47,8 +47,23 @@ That keeps the main program bootable even if asset loading reports errors.
   - Forces the main program and runtime helpers to use the external file tree
   - Keeps the bootstrap alive while leaving `internalAssets` falsy
 
-## Side notes
-- This single-exe project is intended for any project's packing
-- Usually you only need to change 2 files
-  * entry.mjs
-  * packAssets.sh
+## Adapting this folder
+
+This single-exe folder is intended for reuse by other projects. Usually you
+only need to edit these project-specific files first:
+
+- `entry.mjs`
+- `packAssets.sh`
+
+Then the main program can import `buildEarlyExit` from `compiled.js` and call
+it before normal CLI parsing. `--build-exe` and `--build-for <target>` will run
+`packAssets.sh` first, so `assets.tar` is generated as part of the build flow.
+
+```js
+const compiledHelper = await import("./single-exe/compiled.js").catch(() => null);
+await compiledHelper?.buildEarlyExit?.(process.argv, "my-bin");
+```
+
+- `--build-exe` builds with no Bun target.
+- `--build-for <target>` passes `<target>` to `bun build --target=<target>`.
+- The second argument is the output filename. If omitted, it defaults to `single.exe`.
