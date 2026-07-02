@@ -69,6 +69,8 @@ const STATIC_ROOT = path.resolve(__dirname, "./static");
 const DEFAULT_INDEX = path.join(STATIC_ROOT, "index.html");
 const DEFAULT_MANIFEST = path.join(STATIC_ROOT, "manifest.json");
 const DEFAULT_HELP = path.join(STATIC_ROOT, "help.md");
+const DEFAULT_README = path.resolve(__dirname, "./README.md");
+const DEFAULT_README_EN = path.resolve(__dirname, "./README.en.md");
 
 let cliBootstrapPromise = null;
 for (const i of ["rz.js", "sz.js", "viu.mjs", "client.mjs"]) {
@@ -190,11 +192,13 @@ Options:
     (default: -1 (disabled) )
     
   --help-web                    Show help for WebUI frontend
+  --readme                      Show README.md and exit
+  --readme-en                   Show README.en.md and exit
   --help, -h                    Show help for CLI`);
 }
 
-function printWebHelp() {
-  const text = readTextFile(DEFAULT_HELP);
+function printMarkdownFile(filePath) {
+  const text = readTextFile(filePath);
   const markdownAnsi =
     typeof Bun !== "undefined" &&
     Bun &&
@@ -202,7 +206,11 @@ function printWebHelp() {
     typeof Bun.markdown.ansi === "function"
       ? Bun.markdown.ansi
       : null;
-  console.log(markdownAnsi ? markdownAnsi(text) : text);
+  console.log(markdownAnsi ? markdownAnsi(text, { hyperlinks: true }) : text);
+}
+
+function printWebHelp() {
+  printMarkdownFile(DEFAULT_HELP);
 }
 
 function fatal(message, code = 1) {
@@ -453,6 +461,14 @@ function parseArgs(argv) {
         break;
       case "--help-web":
         printWebHelp();
+        process.exit(0);
+        break;
+      case "--readme":
+        printMarkdownFile(DEFAULT_README);
+        process.exit(0);
+        break;
+      case "--readme-en":
+        printMarkdownFile(DEFAULT_README_EN);
         process.exit(0);
         break;
       case "--address":

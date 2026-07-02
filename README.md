@@ -5,10 +5,10 @@
 ## News
 ### 2026/07/03 - [1.1.0]
 - Unicode 11 from upstream
-- WebGL support by --webgl & query args
-- Frontend help by --help-web
-- Added font-size, and font-family
-- Added touch-scroll-threshold for fast scrolling
+- WebGL support by `--webgl` & query args
+- Frontend help by `--help-web`
+- Added `font-size` and `font-family`
+- Added `touch-scroll-threshold` for fast scrolling
 ### 2026/06/22 - [1.0.0]
 - Added gotty cli client
   * compatible with golang gotty

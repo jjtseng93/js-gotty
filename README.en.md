@@ -3,6 +3,13 @@
 [中文 README](README.md)
 
 ## News
+### 2026/07/03 - [1.1.0]
+- Unicode 11 from upstream
+- WebGL support by `--webgl` and query args
+- Frontend help by `--help-web`
+- Added `font-size` and `font-family`
+- Added `touch-scroll-threshold` for fast scrolling
+
 ### 2026/06/22 - [1.0.0]
 - Added gotty cli client
   * compatible with golang gotty
