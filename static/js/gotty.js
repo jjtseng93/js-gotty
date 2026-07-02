@@ -12454,19 +12454,37 @@
           zmodemAddon;
           toServer;
           encoder;
+          fontFamilyOverride;
+          fontSizeOverride;
 	          reconnectAction;
-	          constructor(e) {
+	          constructor(e, t = {}) {
+	            const fontFamilyValue =
+	              "string" == typeof t["font-family"] && t["font-family"].trim()
+	                ? t["font-family"].trim()
+	                : null;
+	            const parsedFontSize = Number(t["font-size"]);
+	            const fontSizeValue =
+	              Number.isFinite(parsedFontSize) && parsedFontSize > 0
+	                ? parsedFontSize
+	                : null;
 	            ((this.elem = e),
+	              (this.fontFamilyOverride = fontFamilyValue),
+	              (this.fontSizeOverride = fontSizeValue),
 	              (this.term = new r.Terminal({
 	                allowProposedApi: !0,
 	                customGlyphs: !0,
 	                rescaleOverlappingGlyphs: !0,
+	                fontFamily:
+	                  fontFamilyValue ||
+	                  "DejaVu Sans Mono, Everson Mono, FreeMono, Menlo, Terminal, monospace, Apple Symbols",
+	                fontSize: fontSizeValue || 15,
 	              })),
 	              (this.fitAddOn = new s.FitAddon()),
 	              (this.zmodemAddon = new a.ZModemAddon({
 	                toTerminal: (e) => this.term.write(e),
 	                toServer: (e) => this.sendInput(e),
 	              })),
+	              this.setPreferences(t),
 	              (() => {
 	                try {
 	                  const e = globalThis.Unicode11Addon;
@@ -12604,8 +12622,11 @@
               "EnableWebGL" == t && t
                 ? this.term.loadAddon(new o.WebglAddon())
                 : "font-size" == t
-                  ? (this.term.options.fontSize = e[t])
-                  : "font-family" == t && (this.term.options.fontFamily = e[t]);
+                  ? (this.term.options.fontSize =
+                      this.fontSizeOverride || e[t])
+                  : "font-family" == t &&
+                    (this.term.options.fontFamily =
+                      this.fontFamilyOverride || e[t]);
             });
           }
           sendInput(e) {
@@ -30988,32 +31009,51 @@
       s = document.getElementById("terminal");
     if (null !== s) {
       var n;
-      n = new r.GoTTYXterm(s);
+      const urlParams = new URLSearchParams(window.location.search);
+      const reconnectToken = urlParams.get("reconnect-token") || "";
+      const startupPrefs = {};
+      const fontFamily = urlParams.get("font-family");
+      if (fontFamily) {
+        startupPrefs["font-family"] = fontFamily;
+      }
+      const fontSize = urlParams.get("font-size");
+      if (fontSize) {
+        const parsedFontSize = Number(fontSize);
+        if (Number.isFinite(parsedFontSize) && parsedFontSize > 0) {
+          startupPrefs["font-size"] = parsedFontSize;
+        }
+      }
+      urlParams.delete("font-family");
+      urlParams.delete("font-size");
+      n = new r.GoTTYXterm(s, startupPrefs);
       if ("undefined" != typeof window) {
         window.__gottyTerminal = n;
       }
-      const i = "https:" == window.location.protocol,
-        o = "" === gotty_ws_query_args ? "" : "?" + gotty_ws_query_args,
-        a =
-          (i ? "wss://" : "ws://") +
-          window.location.host +
-          window.location.pathname +
-          "ws" +
-          o,
-        l = new URLSearchParams(window.location.search),
-        u = l.get("reconnect-token") || "";
-      l.delete("reconnect-token");
-      const g = l.toString(),
-        c = new e.ConnectionFactory(a, t.protocols),
-        d = new t.WebTTY(n, c, "" === g ? "" : "?" + g, gotty_auth_token);
-      d.reconnectToken = u;
+      const isHttps = "https:" == window.location.protocol;
+      const wsQuery = "" === gotty_ws_query_args ? "" : "?" + gotty_ws_query_args;
+      const wsUrl =
+        (isHttps ? "wss://" : "ws://") +
+        window.location.host +
+        window.location.pathname +
+        "ws" +
+        wsQuery;
+      urlParams.delete("reconnect-token");
+      const sessionQuery = urlParams.toString();
+      const connectionFactory = new e.ConnectionFactory(wsUrl, t.protocols);
+      const webTTY = new t.WebTTY(
+        n,
+        connectionFactory,
+        "" === sessionQuery ? "" : "?" + sessionQuery,
+        gotty_auth_token,
+      );
+      webTTY.reconnectToken = reconnectToken;
       if ("undefined" != typeof window) {
         window.__gottyXterm = s.__gottyXterm || null;
-        window.__gottyWebTTY = d;
+        window.__gottyWebTTY = webTTY;
       }
-      const h = d.open();
+      const closeSession = webTTY.open();
       window.addEventListener("unload", () => {
-        (h(), n.close());
+        (closeSession(), n.close());
       });
     }
   })();

@@ -116,6 +116,12 @@
       gotty_ws_query_args
       gotty_themes
 
+    - Frontend-only query args:
+      font-family
+      font-size
+      These are consumed by gotty.js for terminal styling and stripped from the
+      args forwarded to the backend session.
+
     These are internal hooks, not a stable public API.
   -->
   <script src="./auth_token.js"></script>
