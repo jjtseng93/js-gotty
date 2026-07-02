@@ -21,7 +21,7 @@ This folder contains the Bun single-exe bootstrap used by the project.
 - `entry.mjs` imports `assetsLoader.mjs` first
 - `assetsLoader.mjs` loads `assets.tar` with `Bun.Archive` and mounts it as `globalThis.internalAssets`
 - `assetsLoaderPromise` is exposed on `globalThis`
-- `../src/index.js` waits for `assetsLoaderPromise` if it exists
+- The main program waits for `assetsLoaderPromise` if it exists
 
 That keeps the main program bootable even if asset loading reports errors.
 
@@ -44,7 +44,7 @@ That keeps the main program bootable even if asset loading reports errors.
 
 - `--assets-external`
   - Skips loading bundled assets into `globalThis.internalAssets`
-  - Forces `../src/index.js` and runtime helpers to use the external file tree
+  - Forces the main program and runtime helpers to use the external file tree
   - Keeps the bootstrap alive while leaving `internalAssets` falsy
 
 ## Side notes

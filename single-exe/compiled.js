@@ -88,17 +88,19 @@ export async function buildExecutable(target = "",build_outfile="single.exe") {
 
 
     if (result.error || result.status !== 0) {
+    
       if (result.error) {
         console.error(result.error);
       }
-      if (step.label !== "Pack assets") {
-        return result.status ?? 1;
+      
+      if (step.label == "Pack assets") {
+        console.log("Pack assets failed; continuing with the existing assets.tar if available");
       }
-      console.log("Pack assets failed; continuing with the existing assets.tar if available");
+      
     }
     
     
-  }
+  }  //  for steps of build
 
   if(await Bun.file(outfile).exists())
   {
