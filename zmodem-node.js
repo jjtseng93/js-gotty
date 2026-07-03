@@ -3,14 +3,25 @@ const path = require("path");
 const vm = require("vm");
 
 let cachedZmodem = null;
+const singleExeHelpersPromise = globalThis.Bun
+  ? Promise.all([
+      import("./single-exe/compiled.js").catch(() => null),
+      import("./single-exe/assetsHelper.js").catch(() => null),
+    ])
+  : Promise.resolve([null, null]);
 
-function loadZmodem() {
+async function loadZmodem() {
   if (cachedZmodem) {
     return cachedZmodem;
   }
 
-  const bundlePath = path.join(__dirname, "static", "js", "zmodem.js");
-  const source = fs.readFileSync(bundlePath, "utf8");
+  await globalThis.assetsLoaderPromise;
+  const [compiledHelper, assetsHelper] = await singleExeHelpersPromise;
+  const bundleAssetPath = assetsHelper?.assetPath?.("static", "js", "zmodem.js") ?? "static/js/zmodem.js";
+  const source =
+    assetsHelper?.readInternalAssetText?.(bundleAssetPath) ??
+    fs.readFileSync(path.join(compiledHelper?.REPO_ROOT ?? __dirname, "static", "js", "zmodem.js"), "utf8");
+  const bundlePath = path.join(compiledHelper?.REPO_ROOT ?? __dirname, "static", "js", "zmodem.js");
   const quietConsole = {
     debug() {},
     log() {},

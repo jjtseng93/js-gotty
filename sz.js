@@ -26,7 +26,7 @@ async function main() {
   }
 
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
-  const Zmodem = loadZmodem();
+  const Zmodem = await loadZmodem();
   const sentry = new Zmodem.Sentry({
     to_terminal: () => {},
     on_detect: (detection) => {

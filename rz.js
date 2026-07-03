@@ -30,7 +30,7 @@ async function main() {
     return;
   }
 
-  const Zmodem = loadZmodem();
+  const Zmodem = await loadZmodem();
   const session = new Zmodem.Session.Receive();
   let ending = false;
 
