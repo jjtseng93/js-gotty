@@ -10,6 +10,18 @@
 - Added `font-size` and `font-family`
 - Added `touch-scroll-threshold` for fast scrolling
 - Added experimental single-exe build commands: `--build-exe` and `--build-for <target>`
+- Improved ZMODEM / `rz/sz` reliability for large transfers
+  * terminal mode is switched for binary transfer and restored after transfer / cancel
+  * server-side output parsers are bypassed during ZMODEM sessions
+  * ZMODEM data uses ordered WebSocket chunks with acknowledgement / retransmit handling
+- Improved `sz` download UI
+  * streams downloads to browser file writer
+  * shows current file, transferred bytes / total bytes, progress, and verbose transfer logs
+- Improved `rz` upload UI
+  * shows current file, transferred bytes / total bytes, progress, and verbose transfer logs
+  * supports back-to-back `sz` then `rz` sessions more reliably
+- `rz` / `sz` terminal commands now print completion summaries with file path and byte size
+- ZMODEM debug logs are opt-in with `JSGOTTY_ZMODEM_LOG`
 
 ### 2026/06/22 - [1.0.0]
 - Added gotty cli client

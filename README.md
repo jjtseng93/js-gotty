@@ -10,6 +10,18 @@
 - Added `font-size` and `font-family`
 - Added `touch-scroll-threshold` for fast scrolling
 - Added experimental single-exe build commands: `--build-exe` and `--build-for <target>`
+- 改善 ZMODEM / `rz/sz` 大檔案傳輸可靠度
+  * 傳輸時切換終端機模式，結束或取消後恢復
+  * ZMODEM 期間繞過 server-side output parsers
+  * ZMODEM 資料改用有順序、ACK、重送處理的 WebSocket chunks
+- 改善 `sz` 下載 UI
+  * 下載直接串流寫入瀏覽器檔案 writer
+  * 顯示目前檔案、已傳輸 bytes / 總 bytes、進度與 verbose transfer logs
+- 改善 `rz` 上傳 UI
+  * 顯示目前檔案、已傳輸 bytes / 總 bytes、進度與 verbose transfer logs
+  * 改善連續執行 `sz` 後馬上 `rz` 的穩定性
+- `rz` / `sz` 終端機指令完成時會顯示檔案路徑與 byte size
+- ZMODEM debug log 改成透過 `JSGOTTY_ZMODEM_LOG` 才啟用
 ### 2026/06/22 - [1.0.0]
 - Added gotty cli client
   * compatible with golang gotty
