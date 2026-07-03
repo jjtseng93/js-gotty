@@ -3,10 +3,8 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { createRequire } from "module";
 
-const require = createRequire(import.meta.url);
-const { emitBridgeMessage } = require("./windows-bridge-node");
+let emitBridgeMessage = null;
 
 const ESC = "\u001b";
 const ST = `${ESC}\\`;
@@ -364,7 +362,9 @@ function sniffImage(buffer, filePath, options = {}) {
   throw new Error("unsupported image format");
 }
 
-function main() {
+async function main() {
+  emitBridgeMessage = await import('./windows-bridge-node.js').emitBridgeMessage;
+
   const args = process.argv.slice(2);
   const compat = args.includes("--compat");
   const positional = args.filter((arg) => arg !== "--compat");
@@ -380,9 +380,7 @@ function main() {
   writeKittyImage(buffer, image.mime, image.width, image.height, compat);
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error) => {
   stderr(String(error && error.stack ? error.stack : error));
   process.exitCode = 1;
-}
+});
