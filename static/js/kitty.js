@@ -475,8 +475,8 @@
       hideContextMenu();
     }, { passive: true });
 
-    window.addEventListener("blur", hideContextMenu);
-    window.addEventListener("resize", hideContextMenu);
+    //window.addEventListener("blur", hideContextMenu);
+    //window.addEventListener("resize", hideContextMenu);
 
     return state.contextMenu;
   }
