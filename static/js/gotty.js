@@ -12287,19 +12287,35 @@
                     case "y": {
                       const e = i.indexOf(":");
                       if (e === -1) break;
-                      const r = Number.parseInt(i.slice(0, e), 10);
-                      if (!Number.isFinite(r)) break;
-                      if (r === this.zmodemExpectedSeq) {
+                      const s = i.indexOf(":", e + 1);
+                      let r;
+                      let n;
+                      let o;
+                      if (s === -1) {
+                        r = null;
+                        n = Number.parseInt(i.slice(0, e), 10);
+                        o = i.slice(e + 1);
+                      } else {
+                        r = Number.parseInt(i.slice(0, e), 10);
+                        n = Number.parseInt(i.slice(e + 1, s), 10);
+                        o = i.slice(s + 1);
+                      }
+                      if (!Number.isFinite(n)) break;
+                      if (Number.isFinite(r) && r !== this.zmodemStreamId) {
+                        this.zmodemStreamId = r;
+                        this.zmodemExpectedSeq = 0;
+                      }
+                      if (n === this.zmodemExpectedSeq) {
                         this.term.output(
-                          Uint8Array.from(atob(i.slice(e + 1)), (e) =>
+                          Uint8Array.from(atob(o), (e) =>
                             e.charCodeAt(0),
                           ),
                         );
-                        this.zmodemExpectedSeq = r + 1;
-                      } else if (r > this.zmodemExpectedSeq) {
+                        this.zmodemExpectedSeq = n + 1;
+                      } else if (n > this.zmodemExpectedSeq) {
                         window.__gottyZmodemDebug &&
                           window.__gottyZmodemDebug(
-                            `zmodem chunk gap got=${r} expected=${this.zmodemExpectedSeq}`,
+                            `zmodem chunk gap got=${n} expected=${this.zmodemExpectedSeq}`,
                           );
                       }
                       this.connection.send("Y" + String(this.zmodemExpectedSeq - 1));
@@ -12400,6 +12416,7 @@
           sendZmodemMode(e) {
             if (!e) {
               this.zmodemExpectedSeq = 0;
+              this.zmodemStreamId = null;
             }
             this.connection.send("z" + (e ? "1" : "0"));
           }
@@ -12905,15 +12922,17 @@
               t.on("session_end", () => {
                 window.__gottyWebTTY &&
                   window.__gottyWebTTY.sendZmodemMode &&
-                  window.__gottyWebTTY.sendZmodemMode(!1),
-                this.reset();
+                  window.__gottyWebTTY.sendZmodemMode(!1);
               }),
               "send" === t.type
                 ? this.send(t)
                 : (t.on("offer", (e) => this.onOffer(t, e)), t.start()));
           }
           send(e) {
-            (0, s.render)((0, r.jsx)(c, { session: e }), this.elem);
+            (0, s.render)(
+              (0, r.jsx)(c, { session: e, onFinish: () => this.reset() }),
+              this.elem,
+            );
           }
           onOffer(e, t) {
             (0, s.render)(
@@ -12928,6 +12947,10 @@
               (this.debugLines = []),
               (this.debugInputBytes = 0),
               (this.debugReceiveBytes = 0),
+              (this.receiveDone = !1),
+              (this.sessionEnded = !1),
+              (this.finishDone = !1),
+              (this.finishTimer = null),
               this.setState({ state: "notstarted" }));
           }
           debug(e) {
@@ -12962,6 +12985,8 @@
             });
             this.props.session.on("session_end", () => {
               this.debug("session_end");
+              this.sessionEnded = !0;
+              this.finishIfReady();
             });
             this.props.xfer.on("complete", () => {
               this.debug("xfer complete event");
@@ -13046,7 +13071,18 @@
                 "skipped" != this.state.state && d.save_to_disk(e, t);
               }
               this.debug("receive done");
-              (this.forceUpdate(), this.setState({ state: "done" }));
+              this.receiveDone = !0;
+              (this.forceUpdate(),
+                this.setState({
+                  state: this.props.session.has_ended() ? "done" : "finishing",
+                }));
+              if (this.props.session.has_ended()) {
+                this.sessionEnded = !0;
+              }
+              if (!this.finishIfReady()) {
+                this.debug("waiting session_end");
+                this.scheduleFinishFallback();
+              }
             } catch (t) {
               this.debug(`error ${t && t.message ? t.message : t}`);
               (i &&
@@ -13059,6 +13095,10 @@
                 !this.cancelled && this.setState({ state: "notstarted" }));
             } finally {
               clearInterval(e);
+              if (this.finishTimer && this.finishDone) {
+                clearTimeout(this.finishTimer);
+                this.finishTimer = null;
+              }
               if (window.__gottyZmodemDebug) {
                 window.__gottyZmodemDebug = null;
               }
@@ -13068,6 +13108,41 @@
           finish() {
             (console.log("finished"),
               this.props.onFinish && this.props.onFinish());
+          }
+          finishIfReady() {
+            if (!this.receiveDone || !this.sessionEnded) {
+              return !1;
+            }
+            this.completeFinish();
+            return !0;
+          }
+          scheduleFinishFallback() {
+            if (this.finishTimer || this.finishDone) {
+              return;
+            }
+            this.finishTimer = setTimeout(() => {
+              this.finishTimer = null;
+              if (this.finishDone || !this.receiveDone) {
+                return;
+              }
+              this.debug("forcing finish after receive completion");
+              window.__gottyWebTTY &&
+                window.__gottyWebTTY.sendZmodemMode &&
+                window.__gottyWebTTY.sendZmodemMode(!1);
+              this.completeFinish();
+            }, 800);
+          }
+          completeFinish() {
+            if (this.finishDone) {
+              return;
+            }
+            this.finishDone = !0;
+            if (this.finishTimer) {
+              clearTimeout(this.finishTimer);
+              this.finishTimer = null;
+            }
+            this.setState({ state: "done" });
+            this.props.onFinish && this.props.onFinish();
           }
           progress() {
             if ("notstarted" !== this.state.state) {
@@ -13347,12 +13422,25 @@
                 this.debug(`file complete ${r.name}`);
               }
               this.debug("send complete");
-              (this.setState({ state: "done" }),
-                this.props.session.close(),
+              this.debug("closing session");
+              await this.props.session.close();
+              this.debug("session closed");
+              (window.__gottyWebTTY &&
+                window.__gottyWebTTY.sendZmodemMode &&
+                window.__gottyWebTTY.sendZmodemMode(!1),
+                window.__gottyXterm &&
+                  (window.__gottyXterm.options.disableStdin = !1),
+                this.setState({ state: "done" }),
                 void 0 !== this.props.onFinish && this.props.onFinish());
             } catch (e) {
               (this.debug(`error ${e && e.message ? e.message : e}`),
                 console.log(e),
+                window.__gottyWebTTY &&
+                  window.__gottyWebTTY.sendZmodemMode &&
+                  window.__gottyWebTTY.sendZmodemMode(!1),
+                window.__gottyXterm &&
+                  (window.__gottyXterm.options.disableStdin = !1),
+                void 0 !== this.props.onFinish && this.props.onFinish(),
                 this.setState({ state: "notstarted" }));
             }
           }

@@ -1621,6 +1621,7 @@ class PtySession {
     this.zmodemOutputQueue = [];
     this.zmodemOutputInFlight = new Map();
     this.zmodemOutputSeq = 0;
+    this.zmodemOutputStreamId = 0;
     this.zmodemOutputAckedSeq = -1;
     this.zmodemOutputWindow = 8;
     this.zmodemRetransmitTimer = null;
@@ -1718,6 +1719,7 @@ class PtySession {
       data.indexOf(binaryHeaderC) !== -1
     ) {
       this.zmodemBinaryBypass = true;
+      this.resetZmodemOutputFlow();
       this.log("ZMODEM detected: bypassing server-side output parsers for this session");
       return true;
     }
@@ -2163,6 +2165,7 @@ class PtySession {
     this.zmodemOutputQueue = [];
     this.zmodemOutputInFlight = new Map();
     this.zmodemOutputSeq = 0;
+    this.zmodemOutputStreamId += 1;
     this.zmodemOutputAckedSeq = -1;
     if (this.zmodemRetransmitTimer) {
       clearTimeout(this.zmodemRetransmitTimer);
@@ -2187,7 +2190,7 @@ class PtySession {
   }
 
   sendZmodemOutputItem(item, targetWs) {
-    this.send(MSG_ZMODEM_OUTPUT, `${item.seq}:${item.payload}`, targetWs);
+    this.send(MSG_ZMODEM_OUTPUT, `${this.zmodemOutputStreamId}:${item.seq}:${item.payload}`, targetWs);
   }
 
   scheduleZmodemRetransmit() {
