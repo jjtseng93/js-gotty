@@ -13175,7 +13175,56 @@
         class c extends s.Component {
           filePickerRef = (0, s.createRef)();
           constructor(e) {
-            (super(e), this.setState({ state: "notstarted" }));
+            (super(e),
+              (this.debugLines = []),
+              (this.sentBytes = 0),
+              (this.totalBytes = 0),
+              (this.currentFileName = ""),
+              this.setState({ state: "notstarted" }));
+          }
+          debug(e) {
+            const t = new Date().toLocaleTimeString();
+            const i = `${t} ${e}`;
+            (console.log("[zmodem-send]", i),
+              this.debugLines.push(i),
+              80 < this.debugLines.length && this.debugLines.shift(),
+              this.forceUpdate());
+          }
+          attachDebugEvents() {
+            if (this.debugAttached || !this.props.session) return;
+            this.debugAttached = !0;
+            this.props.session.on("receive", (e) => {
+              if (e && e.NAME) {
+                this.debug(`rx header ${e.NAME}`);
+              }
+            });
+            this.props.session.on("session_end", () => {
+              this.debug("session_end");
+            });
+          }
+          progress() {
+            if ("notstarted" !== this.state.state)
+              return (0, r.jsxs)(r.Fragment, {
+                children: [
+                  (0, r.jsx)(a, {
+                    min: 0,
+                    max: this.totalBytes || 1,
+                    now: this.sentBytes,
+                  }),
+                  (0, r.jsxs)("div", {
+                    style: "font-size: 12px; margin-top: 4px;",
+                    children: [
+                      this.sentBytes.toLocaleString(),
+                      " / ",
+                      this.totalBytes.toLocaleString(),
+                      " bytes",
+                      this.currentFileName
+                        ? ` - ${this.currentFileName}`
+                        : "",
+                    ],
+                  }),
+                ],
+              });
           }
           buttons() {
             switch (this.state.state) {
@@ -13211,45 +13260,112 @@
                 return;
             }
           }
-          send() {
-            d.send_files(
-              this.props.session,
-              this.filePickerRef.current.files,
-              {
-                on_offer_response: (e, t) => {
-                  this.setState({ state: "started" });
-                },
-              },
-            )
-              .then(() => {
-                (this.setState({ state: "done" }),
-                  this.props.session.close(),
-                  void 0 !== this.props.onFinish && this.props.onFinish());
-              })
-              .catch((e) => console.log(e));
+          async send() {
+            this.attachDebugEvents();
+            const e = Array.from(this.filePickerRef.current.files || []);
+            this.totalBytes = e.reduce((e, t) => e + (t.size || 0), 0);
+            this.sentBytes = 0;
+            this.currentFileName = "";
+            this.debug(
+              `send start ${e.length} file(s), ${this.totalBytes.toLocaleString()} bytes`,
+            );
+            if (0 === e.length) {
+              this.debug("no files selected");
+              return;
+            }
+            this.setState({ state: "started" });
+            try {
+              let t = this.totalBytes;
+              for (let i = 0; i < e.length; i += 1) {
+                const r = e[i];
+                this.currentFileName = r.name;
+                const s = {
+                  name: r.name,
+                  size: r.size,
+                  mtime: new Date(r.lastModified),
+                  files_remaining: e.length - i,
+                  bytes_remaining: t,
+                };
+                const n = await this.props.session.send_offer(s);
+                this.debug(
+                  `offer ${r.name} ${r.size.toLocaleString()} bytes -> ${
+                    void 0 === n ? "skipped" : "accepted"
+                  }`,
+                );
+                if (void 0 === n) {
+                  t -= r.size;
+                  continue;
+                }
+                const o = 64 * 1024;
+                let a = 0;
+                while (a < r.size) {
+                  const e = Math.min(a + o, r.size);
+                  const t = new Uint8Array(await r.slice(a, e).arrayBuffer());
+                  a = e;
+                  if (a >= r.size) {
+                    await n.end(t);
+                  } else {
+                    n.send(t);
+                  }
+                  this.sentBytes += t.byteLength;
+                  if (
+                    this.sentBytes - (this.lastDebugSentBytes || 0) >=
+                    4 * 1024 * 1024
+                  ) {
+                    this.lastDebugSentBytes = this.sentBytes;
+                    this.debug(
+                      `tx data ${this.sentBytes.toLocaleString()} bytes`,
+                    );
+                  }
+                  this.forceUpdate();
+                  await new Promise((e) => requestAnimationFrame(e));
+                }
+                if (0 === r.size) {
+                  await n.end([]);
+                }
+                t -= r.size;
+                this.debug(`file complete ${r.name}`);
+              }
+              this.debug("send complete");
+              (this.setState({ state: "done" }),
+                this.props.session.close(),
+                void 0 !== this.props.onFinish && this.props.onFinish());
+            } catch (e) {
+              (this.debug(`error ${e && e.message ? e.message : e}`),
+                console.log(e),
+                this.setState({ state: "notstarted" }));
+            }
           }
           render() {
             if ("done" != this.state.state)
               return (0, r.jsx)(o.MyModal, {
                 title: "Send file(s)",
                 buttons: this.buttons(),
-                children: (0, r.jsxs)("div", {
-                  class: "mb-3",
-                  children: [
-                    (0, r.jsx)("label", {
-                      for: "formFileMultiple",
-                      class: "form-label",
-                      children: "Remote requested file transfer",
-                    }),
-                    (0, r.jsx)("input", {
-                      ref: this.filePickerRef,
-                      class: "form-control form-control-sm",
-                      type: "file",
-                      id: "formFileMultiple",
-                      multiple: !0,
-                    }),
-                  ],
-                }),
+                children: [
+                  (0, r.jsxs)("div", {
+                    class: "mb-3",
+                    children: [
+                      (0, r.jsx)("label", {
+                        for: "formFileMultiple",
+                        class: "form-label",
+                        children: "Remote requested file transfer",
+                      }),
+                      (0, r.jsx)("input", {
+                        ref: this.filePickerRef,
+                        class: "form-control form-control-sm",
+                        type: "file",
+                        id: "formFileMultiple",
+                        multiple: !0,
+                      }),
+                    ],
+                  }),
+                  this.progress(),
+                  (0, r.jsx)("pre", {
+                    style:
+                      "max-height: 220px; overflow: auto; white-space: pre-wrap; margin-top: 8px; font-size: 11px;",
+                    children: this.debugLines.join("\n"),
+                  }),
+                ],
               });
           }
         }
