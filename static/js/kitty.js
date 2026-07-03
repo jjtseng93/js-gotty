@@ -18,7 +18,8 @@
     recentClearLineCount: 0,
     touchBound: false,
     touchScroll: null,
-    contextMenu: null
+    contextMenu: null,
+    imageContextBound: false
   };
 
   function xtermElements() {
@@ -440,7 +441,11 @@
 
     document.body.appendChild(menu);
 
-    removeButton.addEventListener("click", () => {
+    let remClick = (e) => {
+    
+      e.preventDefault();
+      e.stopPropagation();
+      
       if (!state.contextMenu || !state.contextMenu.targetKey) {
         return;
       }
@@ -451,7 +456,10 @@
         state.placements.delete(state.contextMenu.targetKey);
       }
       hideContextMenu();
-    });
+    };
+    
+    removeButton.addEventListener("click",remClick)
+    removeButton.addEventListener("contextmenu",remClick)
 
     document.addEventListener("pointerdown", (event) => {
       if (!state.contextMenu || state.contextMenu.root.hidden) {
@@ -504,6 +512,59 @@
     state.contextMenu.root.hidden = true;
   }
 
+  function placementAtPoint(clientX, clientY) {
+    let found = null;
+    let foundZ = -Infinity;
+    let foundIndex = -1;
+    let index = 0;
+    for (const [key, node] of state.placements.entries()) {
+      const rect = node.getBoundingClientRect();
+      if (
+        clientX >= rect.left &&
+        clientX <= rect.right &&
+        clientY >= rect.top &&
+        clientY <= rect.bottom
+      ) {
+        const z = Number.parseInt(node.style.zIndex || "0", 10) || 0;
+        if (z > foundZ || (z === foundZ && index > foundIndex)) {
+          found = key;
+          foundZ = z;
+          foundIndex = index;
+        }
+      }
+      index += 1;
+    }
+    return found;
+  }
+
+  function bindImageContextMenu() {
+    if (state.imageContextBound || !terminal) {
+      return;
+    }
+
+    const handleRightClick = (event) => {
+      if (state.contextMenu && state.contextMenu.root.contains(event.target)) {
+        return;
+      }
+      const key = placementAtPoint(event.clientX, event.clientY);
+      if (!key) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      showContextMenu(event.clientX, event.clientY, key);
+    };
+
+    terminal.addEventListener("mousedown", (event) => {
+      if (event.button === 2) {
+        handleRightClick(event);
+      }
+    }, true);
+
+    terminal.addEventListener("contextmenu", handleRightClick, true);
+    state.imageContextBound = true;
+  }
+
   async function placeImage(message) {
     if (!overlay || !terminal || !message.image) {
       return;
@@ -551,6 +612,7 @@
     bindViewportScroll();
     bindTerminalRender();
     bindTouchScrolling();
+    bindImageContextMenu();
     layoutNode(node);
   }
 
@@ -721,6 +783,7 @@
 
   window.addEventListener("resize", relayoutAll);
   bindTouchScrolling();
+  bindImageContextMenu();
   const originalNativeSend = nativeSend;
   WebSocket.prototype.send = function (data) {
     if (typeof data === "string" && data[0] === "3") {

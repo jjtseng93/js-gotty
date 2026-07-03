@@ -16,7 +16,7 @@
   max-width: none;
   max-height: none;
   image-rendering: auto;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .kitty-context-menu {
