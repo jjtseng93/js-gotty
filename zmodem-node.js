@@ -8,7 +8,8 @@ let cachedZmodem = null;
 let savedTtyMode = null;
 let ttyModeDepth = 0;
 let rawOutputMode = false;
-const debugLogPath = path.join(os.tmpdir(), "zmodem", "zmodem.log");
+const defaultDebugLogPath = path.join(os.tmpdir(), "zmodem", "zmodem.log");
+const debugLogPath = resolveDebugLogPath();
 const singleExeHelpersPromise = globalThis.Bun
   ? Promise.all([
       import("./single-exe/compiled.js").catch(() => null),
@@ -217,8 +218,22 @@ function debugTty(message) {
 }
 
 function appendDebugLog(message) {
+  if (!debugLogPath) {
+    return;
+  }
   fs.mkdirSync(path.dirname(debugLogPath), { recursive: true });
   fs.appendFileSync(debugLogPath, `${new Date().toISOString()} ${message}\n`);
+}
+
+function resolveDebugLogPath() {
+  const value = process.env.JSGOTTY_ZMODEM_LOG || "";
+  if (!value) {
+    return "";
+  }
+  if (/^(1|true|yes)$/i.test(value)) {
+    return defaultDebugLogPath;
+  }
+  return path.resolve(value);
 }
 
 function stderr(message) {
