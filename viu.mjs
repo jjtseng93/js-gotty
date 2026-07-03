@@ -363,7 +363,7 @@ function sniffImage(buffer, filePath, options = {}) {
 }
 
 async function main() {
-  emitBridgeMessage = await import('./windows-bridge-node.js').emitBridgeMessage;
+  emitBridgeMessage = (await import('./windows-bridge-node.js')).emitBridgeMessage;
 
   const args = process.argv.slice(2);
   const compat = args.includes("--compat");
