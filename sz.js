@@ -7,6 +7,7 @@ const {
   restoreStdin,
   setRawStdin,
   stderr,
+  appendDebugLog,
   writeOctets,
 } = require("./zmodem-node");
 const { BridgeInputParser, emitBridgeMessage } = require("./windows-bridge-node");
@@ -27,14 +28,37 @@ async function main() {
 
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
   const Zmodem = await loadZmodem();
+  let writeQueue = Promise.resolve();
+  let queuedOutputBytes = 0;
+  let lastQueuedOutputLog = 0;
+  const queueWriteOctets = (octets) => {
+    const length = Buffer.isBuffer(octets) ? octets.length : octets.length || 0;
+    queuedOutputBytes += length;
+    if (queuedOutputBytes - lastQueuedOutputLog >= 4 * 1024 * 1024) {
+      lastQueuedOutputLog = queuedOutputBytes;
+      debug(`sz debug: queued zmodem output ${queuedOutputBytes.toLocaleString()} bytes`);
+    }
+    writeQueue = writeQueue.then(() => writeOctets(octets));
+    writeQueue.catch((error) => fatal(1, error));
+    return writeQueue;
+  };
+  const waitForOutput = async (label = "") => {
+    if (label) {
+      debug(`sz debug: waiting output drain (${label}) queued=${queuedOutputBytes.toLocaleString()}`);
+    }
+    await writeQueue;
+    if (label) {
+      debug(`sz debug: output drained (${label})`);
+    }
+  };
   const sentry = new Zmodem.Sentry({
     to_terminal: () => {},
     on_detect: (detection) => {
-      void handleDetection(detection, files, totalBytes).catch((error) => fatal(1, error));
+      void handleDetection(detection, files, totalBytes, waitForOutput).catch((error) => fatal(1, error));
     },
     on_retract: () => {},
     sender: (octets) => {
-      void writeOctets(octets).catch((error) => fatal(1, error));
+      queueWriteOctets(octets);
     },
   });
 
@@ -76,19 +100,26 @@ async function main() {
   stderr(`sz ready: waiting for receiver (${files.length} file${files.length > 1 ? "s" : ""})`);
   await writeOctets(Zmodem.Header.build("ZRQINIT").to_hex());
 
-  async function handleDetection(detection, fileSpecs, allBytes) {
+  async function handleDetection(detection, fileSpecs, allBytes, waitForOutput) {
     const session = detection.confirm();
     if (session.type !== "send") {
       throw new Error(`unexpected session type: ${session.type}`);
     }
 
-    session.on("session_end", () => finish(0));
+    session.on("session_end", () => {
+      debug("sz debug: session_end");
+    });
+    session.on("receive", (event) => {
+      if (event && event.NAME) {
+        debug(`sz debug: rx header ${event.NAME}`);
+      }
+    });
 
     let remainingBytes = allBytes;
 
     for (let index = 0; index < fileSpecs.length; index += 1) {
       const file = fileSpecs[index];
-      stderr(`sending ${file.fullPath}`);
+      debug(`sending ${file.fullPath}`);
 
       const transfer = await session.send_offer({
         bytes_remaining: remainingBytes,
@@ -105,12 +136,15 @@ async function main() {
         continue;
       }
 
-      await sendFilePayload(file.fullPath, transfer);
-      stderr(`sent ${file.name}`);
+      await sendFilePayload(file.fullPath, transfer, waitForOutput, file.size);
+      debug(`sent ${file.name}`);
       remainingBytes -= file.size;
     }
 
+    debug("sz debug: closing session");
     await session.close();
+    await waitForOutput("session close");
+    finish(0);
   }
 }
 
@@ -180,9 +214,13 @@ function buildFileSpec(filePath) {
   };
 }
 
-async function sendFilePayload(filePath, transfer) {
+async function sendFilePayload(filePath, transfer, waitForOutput, fileSize) {
   const fd = fs.openSync(filePath, "r");
   const buffer = Buffer.allocUnsafe(8192);
+  const maxPendingOutputBytes = 1024 * 1024;
+  let pendingOutputBytes = 0;
+  let sentBytes = 0;
+  let lastSentLog = 0;
 
   try {
     for (;;) {
@@ -191,12 +229,30 @@ async function sendFilePayload(filePath, transfer) {
         break;
       }
       transfer.send(buffer.subarray(0, bytesRead));
+      sentBytes += bytesRead;
+      if (sentBytes - lastSentLog >= 4 * 1024 * 1024 || sentBytes === fileSize) {
+        lastSentLog = sentBytes;
+        debug(`sz debug: file payload sent ${sentBytes.toLocaleString()}/${fileSize.toLocaleString()} bytes`);
+      }
+      pendingOutputBytes += bytesRead;
+      if (pendingOutputBytes >= maxPendingOutputBytes) {
+        await waitForOutput(`payload ${sentBytes.toLocaleString()}`);
+        pendingOutputBytes = 0;
+      }
     }
   } finally {
     fs.closeSync(fd);
   }
 
-  await transfer.end();
+  debug("sz debug: transfer.end begin");
+  const endPromise = transfer.end();
+  await waitForOutput("transfer end");
+  await endPromise;
+  debug("sz debug: transfer.end complete");
+}
+
+function debug(message) {
+  appendDebugLog(message);
 }
 
 main().catch((error) => {

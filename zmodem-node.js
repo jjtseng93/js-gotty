@@ -1,8 +1,14 @@
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
+const { spawnSync } = require("child_process");
 const vm = require("vm");
 
 let cachedZmodem = null;
+let savedTtyMode = null;
+let ttyModeDepth = 0;
+let rawOutputMode = false;
+const debugLogPath = path.join(os.tmpdir(), "zmodem", "zmodem.log");
 const singleExeHelpersPromise = globalThis.Bun
   ? Promise.all([
       import("./single-exe/compiled.js").catch(() => null),
@@ -63,7 +69,7 @@ async function loadZmodem() {
 
 function writeOctets(octets) {
   let buffer = Buffer.isBuffer(octets) ? octets : Buffer.from(octets);
-  if (process.stdout.isTTY && process.platform !== "win32") {
+  if (process.stdout.isTTY && process.platform !== "win32" && !rawOutputMode) {
     buffer = normalizeTtyOutput(buffer);
   }
   return new Promise((resolve, reject) => {
@@ -87,17 +93,132 @@ function normalizeTtyOutput(buffer) {
 }
 
 function setRawStdin() {
-  if (process.stdin.isTTY && typeof process.stdin.setRawMode === "function") {
-    process.stdin.setRawMode(true);
+  ttyModeDepth += 1;
+  if (ttyModeDepth === 1) {
+    savedTtyMode = saveAndSetRawTtyMode();
+    rawOutputMode = !!savedTtyMode;
+    debugTty(
+      `setRawStdin depth=${ttyModeDepth} stdinTTY=${!!process.stdin.isTTY} stdoutTTY=${!!process.stdout.isTTY} saved=${!!savedTtyMode} rawOutputMode=${rawOutputMode}`,
+    );
+    if (!savedTtyMode && process.stdin.isTTY && typeof process.stdin.setRawMode === "function") {
+      process.stdin.setRawMode(true);
+      debugTty("setRawStdin fallback=process.stdin.setRawMode(true)");
+    }
   }
   process.stdin.resume();
 }
 
 function restoreStdin() {
-  if (process.stdin.isTTY && typeof process.stdin.setRawMode === "function") {
-    process.stdin.setRawMode(false);
+  if (ttyModeDepth > 0) {
+    ttyModeDepth -= 1;
+  }
+  if (ttyModeDepth === 0) {
+    if (savedTtyMode) {
+      debugTty(`restoreStdin restoring stty mode ${savedTtyMode}`);
+      restoreTtyMode(savedTtyMode);
+    } else if (process.stdin.isTTY && typeof process.stdin.setRawMode === "function") {
+      debugTty("restoreStdin fallback=process.stdin.setRawMode(false)");
+      process.stdin.setRawMode(false);
+    }
+    savedTtyMode = null;
+    rawOutputMode = false;
   }
   process.stdin.pause();
+}
+
+function saveAndSetRawTtyMode() {
+  if (process.platform === "win32" || !process.stdin.isTTY) {
+    debugTty(`saveAndSetRawTtyMode skipped platform=${process.platform} stdinTTY=${!!process.stdin.isTTY}`);
+    return null;
+  }
+
+  const tty = openControlTty();
+  if (tty === null) {
+    debugTty("saveAndSetRawTtyMode could not open /dev/tty");
+    return null;
+  }
+
+  try {
+    const saved = spawnSync("stty", ["-g"], {
+      encoding: "utf8",
+      stdio: [tty.fd, "pipe", "pipe"],
+    });
+    if (saved.status !== 0 || !saved.stdout.trim()) {
+      debugTty(`saveAndSetRawTtyMode stty -g failed status=${saved.status} stderr=${String(saved.stderr || "").trim()}`);
+      return null;
+    }
+
+    const mode = saved.stdout.trim();
+    debugTty(`saveAndSetRawTtyMode captured mode=${mode}`);
+    const raw = spawnSync("stty", ["raw", "-echo", "-opost", "-ixon", "-ixoff"], {
+      encoding: "utf8",
+      stdio: [tty.fd, "ignore", "pipe"],
+    });
+    if (raw.status !== 0) {
+      debugTty(`saveAndSetRawTtyMode stty raw failed status=${raw.status} stderr=${String(raw.stderr || "").trim()}`);
+      restoreTtyMode(mode);
+      return null;
+    }
+
+    debugTty("saveAndSetRawTtyMode raw mode enabled");
+    return mode;
+  } finally {
+    if (tty.close) {
+      tty.close();
+    }
+  }
+}
+
+function restoreTtyMode(mode) {
+  if (!mode || process.platform === "win32") {
+    debugTty(`restoreTtyMode skipped mode=${!!mode} platform=${process.platform}`);
+    return;
+  }
+
+  const tty = openControlTty();
+  if (tty === null) {
+    debugTty(`restoreTtyMode could not open /dev/tty for mode=${mode}`);
+    return;
+  }
+
+  try {
+    spawnSync("stty", [mode], {
+      encoding: "utf8",
+      stdio: [tty.fd, "ignore", "ignore"],
+    });
+    debugTty(`restoreTtyMode applied mode=${mode}`);
+  } finally {
+    if (tty.close) {
+      tty.close();
+    }
+  }
+}
+
+function openControlTty() {
+  try {
+    const fd = fs.openSync("/dev/tty", "r+");
+    return {
+      fd,
+      close: () => fs.closeSync(fd),
+    };
+  } catch {
+    if (typeof process.stdin.fd === "number") {
+      return {
+        fd: process.stdin.fd,
+        close: null,
+      };
+    }
+    return null;
+  }
+}
+
+function debugTty(message) {
+  appendDebugLog(message);
+}
+
+function appendDebugLog(message) {
+  fs.mkdirSync(path.dirname(debugLogPath), { recursive: true });
+  fs.appendFileSync(debugLogPath, `${new Date().toISOString()} ${message}\n`);
 }
 
 function stderr(message) {
@@ -118,5 +239,7 @@ module.exports = {
   restoreStdin,
   setRawStdin,
   stderr,
+  debugLogPath,
+  appendDebugLog,
   writeOctets,
 };

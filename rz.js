@@ -8,6 +8,7 @@ const {
   restoreStdin,
   setRawStdin,
   stderr,
+  appendDebugLog,
   writeOctets,
 } = require("./zmodem-node");
 const {
@@ -155,7 +156,7 @@ async function receiveOffer(offer, targetDir) {
   const outputPath = path.join(targetDir, localName);
   const fd = fs.openSync(outputPath, "w", details.mode ? details.mode & 0o777 : 0o644);
 
-  stderr(`receiving ${originalName} -> ${outputPath}`);
+  debug(`receiving ${originalName} -> ${outputPath}`);
 
   try {
     await offer.accept({
@@ -171,7 +172,11 @@ async function receiveOffer(offer, targetDir) {
     fs.utimesSync(outputPath, new Date(), details.mtime);
   }
 
-  stderr(`received ${outputPath}`);
+  debug(`received ${outputPath}`);
+}
+
+function debug(message) {
+  appendDebugLog(message);
 }
 
 main().catch((error) => {

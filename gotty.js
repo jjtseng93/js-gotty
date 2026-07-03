@@ -30,6 +30,9 @@ const MSG_KITTY_GRAPHICS = "7";
 const MSG_WINDOWS_BRIDGE = "9";
 const MSG_SET_ROLE = "a";
 const MSG_CONTROL_RESULT = "b";
+const MSG_ZMODEM_MODE = "z";
+const MSG_ZMODEM_OUTPUT = "y";
+const MSG_ZMODEM_ACK = "Y";
 const KITTY_TRACE = process.env.KITTY_TRACE === "1";
 const WINDOWS_BRIDGE_TRACE = process.env.WINDOWS_BRIDGE_TRACE === "1";
 const WINDOWS_BRIDGE_PREFIX = Buffer.from("@@GOTTYCTL:", "ascii");
@@ -1591,7 +1594,7 @@ class PtySession {
     this.permitWrite = options.permitWrite;
     this.columns = options.width || 0;
     this.rows = options.height || 0;
-    this.bufferSize = 1024;
+    this.bufferSize = 64 * 1024;
     this.closed = false;
     this.backendExited = false;
     this.backendExitPromise = new Promise((resolve) => {
@@ -1611,6 +1614,16 @@ class PtySession {
     this.windowsBridgeSeen = new Set();
     this.windowsBridgeSeenOrder = [];
     this.pendingEchoBytes = Buffer.alloc(0);
+    this.zmodemBinaryBypass = false;
+    this.zmodemDetectTail = Buffer.alloc(0);
+    this.zmodemBinaryBytesSent = 0;
+    this.zmodemBinaryBytesLogged = 0;
+    this.zmodemOutputQueue = [];
+    this.zmodemOutputInFlight = new Map();
+    this.zmodemOutputSeq = 0;
+    this.zmodemOutputAckedSeq = -1;
+    this.zmodemOutputWindow = 8;
+    this.zmodemRetransmitTimer = null;
 
     this.slaveVars = {
       command: options.command,
@@ -1622,6 +1635,10 @@ class PtySession {
   start() {
     this.backend.onData((raw) => {
       if (this.closed) {
+        return;
+      }
+      if (this.shouldBypassOutputParsers(raw)) {
+        this.sendChunk(MSG_OUTPUT, raw);
         return;
       }
       const cursorBefore = this.cursorTracker.snapshot();
@@ -1682,6 +1699,32 @@ class PtySession {
     );
   }
 
+  shouldBypassOutputParsers(raw) {
+    if (this.zmodemBinaryBypass) {
+      return true;
+    }
+
+    const data = this.zmodemDetectTail.length > 0
+      ? Buffer.concat([this.zmodemDetectTail, raw])
+      : raw;
+    this.zmodemDetectTail = data.subarray(Math.max(0, data.length - 8));
+
+    const binaryHeaderA = Buffer.from([0x2a, 0x18, 0x41]);
+    const binaryHeaderC = Buffer.from([0x2a, 0x18, 0x43]);
+    const hexHeader = Buffer.from([0x2a, 0x2a, 0x18, 0x42]);
+    if (
+      data.indexOf(hexHeader) !== -1 ||
+      data.indexOf(binaryHeaderA) !== -1 ||
+      data.indexOf(binaryHeaderC) !== -1
+    ) {
+      this.zmodemBinaryBypass = true;
+      this.log("ZMODEM detected: bypassing server-side output parsers for this session");
+      return true;
+    }
+
+    return false;
+  }
+
   attachWebSocket(ws, remoteAddr = "", readOnly = false) {
     if (!ws || this.closed) {
       return false;
@@ -1695,7 +1738,8 @@ class PtySession {
     this.clients.set(ws, {
       remoteAddr,
       encoding: "null",
-      readOnly
+      readOnly,
+      sendQueue: Promise.resolve()
     });
     if (this.permitWrite && !readOnly && !this.writerWs) {
       this.writerWs = ws;
@@ -2073,6 +2117,11 @@ class PtySession {
   }
 
   sendChunk(type, raw) {
+    if (type === MSG_OUTPUT && this.zmodemBinaryBypass) {
+      this.sendZmodemOutput(raw);
+      return;
+    }
+
     if (type === MSG_OUTPUT && this.supportsWindowsBridge) {
       const bridged = this.outgoingWindowsBridgeParser.consume(raw);
       for (const control of bridged.controls) {
@@ -2089,6 +2138,78 @@ class PtySession {
       const chunk = raw.subarray(offset, Math.min(offset + maxChunkSize, raw.length));
       this.send(type, chunk.toString("base64"));
     }
+  }
+
+  sendZmodemOutput(raw) {
+    this.zmodemBinaryBytesSent += raw.length;
+    if (this.zmodemBinaryBytesSent - this.zmodemBinaryBytesLogged >= 16 * 1024 * 1024) {
+      this.zmodemBinaryBytesLogged = this.zmodemBinaryBytesSent;
+      this.log(`ZMODEM text websocket output ${this.zmodemBinaryBytesSent.toLocaleString()} bytes`);
+    }
+
+    const maxChunkSize = 3 * 1024;
+    for (let offset = 0; offset < raw.length; offset += maxChunkSize) {
+      const chunk = raw.subarray(offset, Math.min(offset + maxChunkSize, raw.length));
+      this.zmodemOutputQueue.push({
+        seq: this.zmodemOutputSeq,
+        payload: chunk.toString("base64")
+      });
+      this.zmodemOutputSeq += 1;
+    }
+    this.flushZmodemOutput();
+  }
+
+  resetZmodemOutputFlow() {
+    this.zmodemOutputQueue = [];
+    this.zmodemOutputInFlight = new Map();
+    this.zmodemOutputSeq = 0;
+    this.zmodemOutputAckedSeq = -1;
+    if (this.zmodemRetransmitTimer) {
+      clearTimeout(this.zmodemRetransmitTimer);
+      this.zmodemRetransmitTimer = null;
+    }
+  }
+
+  flushZmodemOutput() {
+    const targetWs = this.writerWs && this.writerWs.readyState === WebSocket.OPEN
+      ? this.writerWs
+      : this.clients.keys().next().value;
+    if (!targetWs || targetWs.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    while (this.zmodemOutputInFlight.size < this.zmodemOutputWindow && this.zmodemOutputQueue.length > 0) {
+      const item = this.zmodemOutputQueue.shift();
+      this.zmodemOutputInFlight.set(item.seq, item);
+      this.sendZmodemOutputItem(item, targetWs);
+    }
+    this.scheduleZmodemRetransmit();
+  }
+
+  sendZmodemOutputItem(item, targetWs) {
+    this.send(MSG_ZMODEM_OUTPUT, `${item.seq}:${item.payload}`, targetWs);
+  }
+
+  scheduleZmodemRetransmit() {
+    if (this.zmodemRetransmitTimer || this.zmodemOutputInFlight.size === 0) {
+      return;
+    }
+    this.zmodemRetransmitTimer = setTimeout(() => {
+      this.zmodemRetransmitTimer = null;
+      if (!this.zmodemBinaryBypass || this.zmodemOutputInFlight.size === 0) {
+        return;
+      }
+      const targetWs = this.writerWs && this.writerWs.readyState === WebSocket.OPEN
+        ? this.writerWs
+        : this.clients.keys().next().value;
+      if (!targetWs || targetWs.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      for (const item of this.zmodemOutputInFlight.values()) {
+        this.sendZmodemOutputItem(item, targetWs);
+      }
+      this.scheduleZmodemRetransmit();
+    }, 750);
   }
 
   filterEchoedTerminalReplies(raw) {
@@ -2250,6 +2371,41 @@ class PtySession {
           client.encoding = payload;
         }
         break;
+      case MSG_ZMODEM_MODE:
+        if (!this.isWriter(ws)) {
+          return;
+        }
+        {
+          const enabled = payload === "1";
+          const wasEnabled = this.zmodemBinaryBypass;
+          this.zmodemBinaryBypass = enabled;
+          if (this.zmodemBinaryBypass && !wasEnabled) {
+            this.zmodemBinaryBytesSent = 0;
+            this.zmodemBinaryBytesLogged = 0;
+            this.resetZmodemOutputFlow();
+          } else if (!this.zmodemBinaryBypass) {
+            this.resetZmodemOutputFlow();
+          }
+          this.log(`ZMODEM parser bypass ${this.zmodemBinaryBypass ? "enabled" : "disabled"} by browser`);
+        }
+        break;
+      case MSG_ZMODEM_ACK: {
+        if (!this.isWriter(ws)) {
+          return;
+        }
+        const seq = Number.parseInt(payload, 10);
+        if (!Number.isFinite(seq) || seq <= this.zmodemOutputAckedSeq) {
+          return;
+        }
+        for (const key of this.zmodemOutputInFlight.keys()) {
+          if (key <= seq) {
+            this.zmodemOutputInFlight.delete(key);
+          }
+        }
+        this.zmodemOutputAckedSeq = seq;
+        this.flushZmodemOutput();
+        break;
+      }
       case MSG_RESIZE_TERMINAL: {
         if (!this.isWriter(ws) || (this.columns !== 0 && this.rows !== 0)) {
           return;
@@ -2275,17 +2431,51 @@ class PtySession {
 
   send(type, payload, targetWs = null) {
     if (targetWs) {
-      if (this.clients.has(targetWs) && targetWs.readyState === WebSocket.OPEN) {
-        targetWs.send(type + payload);
-      }
+      this.queueSend(targetWs, type + payload);
       return;
     }
 
     for (const ws of this.clients.keys()) {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(type + payload);
-      }
+      this.queueSend(ws, type + payload);
     }
+  }
+
+  queueSend(ws, payload, binary = false) {
+    const client = this.clients.get(ws);
+    if (!client || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const sendOne = async () => {
+      await new Promise((resolve, reject) => {
+        try {
+          if (binary) {
+            ws.send(payload, { binary: true }, (error) => {
+              if (error) {
+                reject(error);
+                return;
+              }
+              resolve();
+            });
+          } else {
+            ws.send(payload, (error) => {
+              if (error) {
+                reject(error);
+                return;
+              }
+              resolve();
+            });
+          }
+        } catch (error) {
+          reject(error);
+        }
+      });
+    };
+
+    client.sendQueue = client.sendQueue.then(sendOne, sendOne);
+    client.sendQueue.catch((error) => {
+      this.log(`WebSocket send failed: ${error && error.message ? error.message : error}`);
+    });
   }
 
   terminateBackend(gracePeriodMs = 5000) {
@@ -2656,6 +2846,7 @@ function createServerRuntime(command, argv, options) {
   const wss = new WebSocketServer({
     noServer: true,
     clientTracking: false,
+    perMessageDeflate: false,
     handleProtocols(protocols) {
       return protocols.has("webtty") ? "webtty" : false;
     }

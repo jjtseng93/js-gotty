@@ -12192,6 +12192,7 @@
             this.reconnectToken = "";
             this.reconnectDeadline = 0;
             this.reconnectAttempts = 0;
+            this.zmodemExpectedSeq = 0;
           }
           open() {
             let e;
@@ -12263,6 +12264,19 @@
                   }, 3e4)));
               }),
                 r.onReceive((e) => {
+                  if ("string" != typeof e) {
+                    const i =
+                      e instanceof ArrayBuffer
+                        ? new Uint8Array(e)
+                        : new Uint8Array(e.buffer, e.byteOffset, e.byteLength);
+                    if (0 === i.length) return;
+                    switch (String.fromCharCode(i[0])) {
+                      case t.msgOutput:
+                        this.term.output(i.subarray(1));
+                        break;
+                    }
+                    return;
+                  }
                   const i = e.slice(1);
                   switch (e[0]) {
                     case t.msgOutput:
@@ -12270,6 +12284,27 @@
                         Uint8Array.from(atob(i), (e) => e.charCodeAt(0)),
                       );
                       break;
+                    case "y": {
+                      const e = i.indexOf(":");
+                      if (e === -1) break;
+                      const r = Number.parseInt(i.slice(0, e), 10);
+                      if (!Number.isFinite(r)) break;
+                      if (r === this.zmodemExpectedSeq) {
+                        this.term.output(
+                          Uint8Array.from(atob(i.slice(e + 1)), (e) =>
+                            e.charCodeAt(0),
+                          ),
+                        );
+                        this.zmodemExpectedSeq = r + 1;
+                      } else if (r > this.zmodemExpectedSeq) {
+                        window.__gottyZmodemDebug &&
+                          window.__gottyZmodemDebug(
+                            `zmodem chunk gap got=${r} expected=${this.zmodemExpectedSeq}`,
+                          );
+                      }
+                      this.connection.send("Y" + String(this.zmodemExpectedSeq - 1));
+                      break;
+                    }
                     case t.msgPong:
                       break;
                     case t.msgSetWindowTitle:
@@ -12361,6 +12396,12 @@
           }
           sendSetEncoding(e) {
             this.connection.send(t.msgSetEncoding + e);
+          }
+          sendZmodemMode(e) {
+            if (!e) {
+              this.zmodemExpectedSeq = 0;
+            }
+            this.connection.send("z" + (e ? "1" : "0"));
           }
         };
       },
@@ -12824,7 +12865,16 @@
               document.body.prepend(this.elem));
           }
           consume(e) {
-            this.sentry.consume(e);
+            try {
+              this.sentry.consume(e);
+            } catch (e) {
+              (console.error(e),
+                window.__gottyZmodemDebug &&
+                  window.__gottyZmodemDebug(
+                    `consume error ${e && e.message ? e.message : e}`,
+                  ));
+              throw e;
+            }
           }
           activate(e) {
             this.term = e;
@@ -12849,37 +12899,171 @@
           onDetect(e) {
             var t = e.confirm();
             ((this.term.options.disableStdin = !0),
+              window.__gottyWebTTY &&
+                window.__gottyWebTTY.sendZmodemMode &&
+                window.__gottyWebTTY.sendZmodemMode(!0),
               t.on("session_end", () => {
+                window.__gottyWebTTY &&
+                  window.__gottyWebTTY.sendZmodemMode &&
+                  window.__gottyWebTTY.sendZmodemMode(!1),
                 this.reset();
               }),
               "send" === t.type
                 ? this.send(t)
-                : (t.on("offer", (e) => this.onOffer(e)), t.start()));
+                : (t.on("offer", (e) => this.onOffer(t, e)), t.start()));
           }
           send(e) {
             (0, s.render)((0, r.jsx)(c, { session: e }), this.elem);
           }
-          onOffer(e) {
+          onOffer(e, t) {
             (0, s.render)(
-              (0, r.jsx)(l, { xfer: e, onFinish: () => this.reset() }),
+              (0, r.jsx)(l, { session: e, xfer: t, onFinish: () => this.reset() }),
               this.elem,
             );
           }
         };
         class l extends s.Component {
           constructor(e) {
-            (super(e), this.setState({ state: "notstarted" }));
+            (super(e),
+              (this.debugLines = []),
+              (this.debugInputBytes = 0),
+              (this.debugReceiveBytes = 0),
+              this.setState({ state: "notstarted" }));
           }
-          accept() {
+          debug(e) {
+            const t = new Date().toLocaleTimeString();
+            const i = `${t} ${e}`;
+            (console.log("[zmodem-recv]", i),
+              this.debugLines.push(i),
+              80 < this.debugLines.length && this.debugLines.shift(),
+              this.forceUpdate());
+          }
+          attachDebugEvents() {
+            if (this.debugAttached || !this.props.session) return;
+            this.debugAttached = !0;
+            this.props.session.on("receive", (e) => {
+              if (e && e.NAME) {
+                this.debug(`rx header ${e.NAME}`);
+                return;
+              }
+              if (e && e.get_payload) {
+                const t = e.get_payload();
+                this.debugReceiveBytes += t ? t.length : 0;
+                if (
+                  this.debugReceiveBytes - (this.lastDebugReceiveBytes || 0) >=
+                  4 * 1024 * 1024
+                ) {
+                  this.lastDebugReceiveBytes = this.debugReceiveBytes;
+                  this.debug(
+                    `rx data ${this.debugReceiveBytes.toLocaleString()} bytes`,
+                  );
+                }
+              }
+            });
+            this.props.session.on("session_end", () => {
+              this.debug("session_end");
+            });
+            this.props.xfer.on("complete", () => {
+              this.debug("xfer complete event");
+            });
+          }
+          async accept() {
+            this.cancelled = !1;
+            this.attachDebugEvents();
+            window.__gottyZmodemDebug = (e) => this.debug(e);
+            this.debug(
+              `accept ${this.props.xfer.get_details().name} ${this.props.xfer
+                .get_details()
+                .size.toLocaleString()} bytes`,
+            );
             this.setState({ state: "started" });
             let e = setInterval(() => this.forceUpdate(), 100);
-            this.props.xfer.accept().then((t) => {
-              (clearInterval(e),
-                this.forceUpdate(),
-                "skipped" != this.state.state &&
-                  d.save_to_disk(t, this.props.xfer.get_details().name),
-                this.setState({ state: "done" }));
-            });
+            const t = this.props.xfer.get_details().name;
+            let i = null;
+            this.writer = null;
+            let n = Promise.resolve();
+            let o = !1;
+            const a = 4 * 1024 * 1024;
+            let l = [];
+            let c = 0;
+            const h = () => {
+              if (0 === c) return;
+              const e = new Uint8Array(c);
+              let t = 0;
+              for (const i of l) {
+                e.set(i, t);
+                t += i.byteLength;
+              }
+              l = [];
+              c = 0;
+              n = n.then(() => i.write(e));
+            };
+            try {
+              if (
+                "function" == typeof window.showSaveFilePicker &&
+                "skipped" != this.state.state
+              ) {
+                const e = await window.showSaveFilePicker({
+                  suggestedName: t,
+                });
+                this.debug("save picker accepted");
+                i = await e.createWritable();
+                this.debug("writable opened");
+                this.writer = i;
+                o = !0;
+                await this.props.xfer.accept({
+                  on_input: (e) => {
+                    if (this.cancelled) return;
+                    const t = new Uint8Array(e);
+                    this.debugInputBytes += t.byteLength;
+                    if (
+                      this.debugInputBytes - (this.lastDebugInputBytes || 0) >=
+                      4 * 1024 * 1024
+                    ) {
+                      this.lastDebugInputBytes = this.debugInputBytes;
+                      this.debug(
+                        `on_input ${this.debugInputBytes.toLocaleString()} bytes`,
+                      );
+                    }
+                    (l.push(t), (c += t.byteLength), c >= a && h());
+                  },
+                });
+                if (this.cancelled) return;
+                this.debug("xfer.accept resolved");
+                this.setState({ state: "finishing" });
+                h();
+                this.debug("waiting queued writes");
+                await n;
+                if (this.cancelled) return;
+                this.debug("closing writable");
+                await i.close();
+                this.debug("writable closed");
+              } else {
+                this.debug("fallback blob receive");
+                o = !0;
+                const e = await this.props.xfer.accept();
+                this.debug("fallback xfer.accept resolved");
+                "skipped" != this.state.state && d.save_to_disk(e, t);
+              }
+              this.debug("receive done");
+              (this.forceUpdate(), this.setState({ state: "done" }));
+            } catch (t) {
+              this.debug(`error ${t && t.message ? t.message : t}`);
+              (i &&
+                  i.abort &&
+                  i.abort().catch(() => {}),
+                !o &&
+                  this.props.xfer.skip &&
+                  this.props.xfer.skip(),
+                console.error(t),
+                !this.cancelled && this.setState({ state: "notstarted" }));
+            } finally {
+              clearInterval(e);
+              if (window.__gottyZmodemDebug) {
+                window.__gottyZmodemDebug = null;
+              }
+              this.writer = null;
+            }
           }
           finish() {
             (console.log("finished"),
@@ -12894,7 +13078,28 @@
               });
           }
           skip() {
-            (this.props.xfer.skip(), this.setState({ state: "skipped" }));
+            (this.debug("decline/skip"),
+              window.__gottyWebTTY &&
+                window.__gottyWebTTY.sendZmodemMode &&
+                window.__gottyWebTTY.sendZmodemMode(!1),
+              this.props.xfer.skip(),
+              this.setState({ state: "skipped" }));
+          }
+          cancel() {
+            this.cancelled = !0;
+            this.debug("cancel -> session.abort");
+            this.setState({ state: "skipped" });
+            window.__gottyWebTTY &&
+              window.__gottyWebTTY.sendZmodemMode &&
+              window.__gottyWebTTY.sendZmodemMode(!1);
+            try {
+              this.props.session && this.props.session.abort();
+            } catch (e) {
+              console.error(e);
+            }
+            if (this.writer && this.writer.abort) {
+              this.writer.abort().catch(() => {});
+            }
           }
           buttons() {
             switch (this.state.state) {
@@ -12918,11 +13123,12 @@
                   ],
                 });
               case "started":
+              case "finishing":
                 return (0, r.jsx)(r.Fragment, {
                   children: (0, r.jsx)(o.Button, {
                     priority: "danger",
                     clickHandler: () => {
-                      this.skip();
+                      this.cancel();
                     },
                     children: "Cancel",
                   }),
@@ -12953,6 +13159,14 @@
                     .size.toLocaleString(void 0, { maximumFractionDigits: 0 }),
                   " bytes)?",
                   this.progress(),
+                  "finishing" === this.state.state
+                    ? (0, r.jsx)("div", { children: "Finishing..." })
+                    : null,
+                  (0, r.jsx)("pre", {
+                    style:
+                      "max-height: 220px; overflow: auto; white-space: pre-wrap; margin-top: 8px; font-size: 11px;",
+                    children: this.debugLines.join("\n"),
+                  }),
                 ],
               });
           }
@@ -30060,6 +30274,7 @@
           bare;
           constructor(e, t) {
             this.bare = new WebSocket(e, t);
+            this.bare.binaryType = "arraybuffer";
           }
           open() {}
           close() {
@@ -30107,7 +30322,7 @@
             i(182),
             i(959),
           ));
-        const s = ["CANFDX", "CANOVIO", "CANFC32"],
+        const s = ["CANFDX", "CANOVIO", "CANFC32", "ESCCTL"],
           n = "spool_uint8array",
           o = [79, 79],
           a = r.ZMLIB.ABORT_SEQUENCE;
@@ -30436,11 +30651,21 @@
                           this._consume_ZDATA_data),
                         (this._next_header_handler = {
                           ZEOF: function (t) {
-                            (this._consume_ZEOF(t),
+                            (window.__gottyZmodemDebug &&
+                              window.__gottyZmodemDebug(
+                                `ZEOF handler local=${this._file_offset} remote=${t.get_offset()}`,
+                              ),
+                              this._consume_ZEOF(t),
+                              window.__gottyZmodemDebug &&
+                                window.__gottyZmodemDebug("ZEOF consumed"),
                               (this._next_subpacket_handler = null),
                               this._make_promise_for_between_files(),
                               e(),
-                              this._send_ZRINIT());
+                              window.__gottyZmodemDebug &&
+                                window.__gottyZmodemDebug("accept promise resolved from ZEOF"),
+                              this._send_ZRINIT(),
+                              window.__gottyZmodemDebug &&
+                                window.__gottyZmodemDebug("ZRINIT sent after ZEOF"));
                           },
                         }));
                     },
