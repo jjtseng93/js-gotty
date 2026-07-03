@@ -50,10 +50,24 @@
 
   function cellMetrics() {
     ensureOverlayBounds();
-    const { screen, rows, helper } = xtermElements();
+    const { screen, rows } = xtermElements();
     const rect = (screen || terminal).getBoundingClientRect();
     let cellWidth = rect.width / Math.max(1, state.cols);
     let cellHeight = rect.height / Math.max(1, state.rows);
+    const xterm = terminal && terminal.__gottyXterm;
+    const rendererCell = xterm && xterm._core && xterm._core._renderService &&
+      xterm._core._renderService.dimensions &&
+      xterm._core._renderService.dimensions.css &&
+      xterm._core._renderService.dimensions.css.cell;
+
+    if (rendererCell) {
+      if (Number.isFinite(rendererCell.width) && rendererCell.width > 0) {
+        cellWidth = rendererCell.width;
+      }
+      if (Number.isFinite(rendererCell.height) && rendererCell.height > 0) {
+        cellHeight = rendererCell.height;
+      }
+    }
 
     if (rows) {
       const firstRow = rows.firstElementChild;
@@ -62,16 +76,6 @@
         if (rowRect.height > 0) {
           cellHeight = rowRect.height;
         }
-      }
-    }
-
-    if (helper) {
-      const helperRect = helper.getBoundingClientRect();
-      if (helperRect.width > 0) {
-        cellWidth = helperRect.width;
-      }
-      if (helperRect.height > 0) {
-        cellHeight = helperRect.height;
       }
     }
 
