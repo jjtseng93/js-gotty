@@ -80,9 +80,7 @@ let helperReadInternalAssetText = null;
 let helperReadInternalAssetBytes = null;
 
 function configureResourceRoot(compiledHelper) {
-  RESOURCE_ROOT = compiledHelper?.isCompiledBinary?.(process.argv)
-    ? compiledHelper.resolveCompiledBaseDir({ argv: process.argv })
-    : __dirname;
+  RESOURCE_ROOT = compiledHelper?.REPO_ROOT
   STATIC_ROOT = path.resolve(RESOURCE_ROOT, "./static");
   DEFAULT_INDEX = path.join(STATIC_ROOT, "index.html");
   DEFAULT_MANIFEST = path.join(STATIC_ROOT, "manifest.json");

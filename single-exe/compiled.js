@@ -4,19 +4,23 @@ import { fileURLToPath } from "node:url";
 import child_process from "node:child_process";
 
 
-const IS_COMPILED = isCompiledBinary(process.argv);
-const REPO_ROOT = IS_COMPILED
-  ? resolveCompiledBaseDir({ argv: process.argv })
-  : resolve(dirname(fileURLToPath(import.meta.url)), "..");
+export const IS_COMPILED = isCompiledBinary();
+export const REPO_ROOT = IS_COMPILED
+  ? getExeDirname()
+  : resolve(import.meta.dirname, "..");
 const SINGLE_EXE_DIR = resolve(REPO_ROOT, "single-exe");
 const SINGLE_EXE_ENTRY = resolve(SINGLE_EXE_DIR, "entry.mjs");
 
 
-export function isCompiledBinary(argv = process.argv) {
+export function isCompiledBinary() {
+  const argv = process.argv
   return Boolean(argv?.[1]?.startsWith?.("/$bunfs/"));
 }
 
-export function resolveCompiledBaseDir({ argv = process.argv, execPath = process.execPath } = {}) {
+export function getExeDirname() {
+  const argv = process.argv
+  const execPath = process.execPath
+  
   const bn = basename(execPath);
   if (bn.startsWith("ld") || 
       bn.startsWith("libld") ||
@@ -27,20 +31,17 @@ export function resolveCompiledBaseDir({ argv = process.argv, execPath = process
   return dirname(execPath) || process.cwd();
 }
 
-export function resolveRepoRoot(importMetaUrl, options = {}) {
-  if (isCompiledBinary(options.argv)) {
-    return resolveCompiledBaseDir(options);
-  }
-  return resolve(dirname(fileURLToPath(importMetaUrl)), "..");
+export function getDirnameFromUrl(importMetaUrl) {
+  return dirname(fileURLToPath(importMetaUrl));
 }
 
 export async function buildExecutable(target = "",build_outfile="single.exe") {
  
   const outfile = resolve(process.cwd(), build_outfile);
   const normalizedTarget = String(target || "").trim();
-  if(!globalThis.Bun)
+  if(!globalThis.Bun || IS_COMPILED)
   {
-    console.log("Build exe can only be run by Bun");
+    console.log("Build exe can only be run by Bun in the source tree");
     return 1;
   }
   

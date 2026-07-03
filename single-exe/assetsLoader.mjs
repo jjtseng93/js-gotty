@@ -1,5 +1,5 @@
 import assets from "./assets.tar" with { type: "file" };
-import { resolveCompiledBaseDir, isCompiledBinary } from "./compiled.js";
+import { getExeDirname, isCompiledBinary } from "./compiled.js";
 
 const forceExternalAssets = process.argv.includes("--assets-external");
 const debugAssetsLoader = Boolean(process.env.BUNMICRO_DEBUG);
@@ -71,9 +71,9 @@ async function cliEarlyExit(archive, argv) {
   }
 
   if (argv.includes("--assets-extract")) {
-    if (isCompiledBinary(argv))
+    if (isCompiledBinary())
     {
-      const targetDir = resolveCompiledBaseDir({ argv });
+      const targetDir = getExeDirname();
       const extracted = await archive.extract(targetDir);
       console.log(`Extracted ${extracted} asset(s) to ${targetDir}`);
     }  //  if isCompiled
