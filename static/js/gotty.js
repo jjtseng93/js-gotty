@@ -13070,12 +13070,32 @@
               this.props.onFinish && this.props.onFinish());
           }
           progress() {
-            if ("notstarted" !== this.state.state)
-              return (0, r.jsx)(a, {
-                min: 0,
-                max: this.props.xfer.get_details().size,
-                now: this.props.xfer.get_offset(),
+            if ("notstarted" !== this.state.state) {
+              const e = this.props.xfer.get_details();
+              const t = Number.isFinite(e.size) ? e.size : 0;
+              const i = this.props.xfer.get_offset() || 0;
+              return (0, r.jsxs)(r.Fragment, {
+                children: [
+                  (0, r.jsx)(a, {
+                    min: 0,
+                    max: t || 1,
+                    now: i,
+                  }),
+                  (0, r.jsxs)("div", {
+                    style: "font-size: 12px; margin-top: 4px;",
+                    children: [
+                      i.toLocaleString(),
+                      " / ",
+                      t.toLocaleString(),
+                      " bytes",
+                      e.name
+                        ? ` - ${e.name}`
+                        : "",
+                    ],
+                  }),
+                ],
               });
+            }
           }
           skip() {
             (this.debug("decline/skip"),
