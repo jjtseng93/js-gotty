@@ -34,6 +34,7 @@ async function main() {
   const Zmodem = await loadZmodem();
   const session = new Zmodem.Session.Receive();
   let ending = false;
+  const completedUploads = [];
 
   const finish = (code, error) => {
     if (ending) {
@@ -43,6 +44,10 @@ async function main() {
     restoreStdin();
     if (error) {
       stderr(String(error && error.stack ? error.stack : error));
+    } else if (code === 0) {
+      for (const file of completedUploads) {
+        stderr(`uploaded ${file.path} (${formatByteCount(file.size)})`);
+      }
     }
     process.exitCode = code;
   };
@@ -61,7 +66,7 @@ async function main() {
   });
 
   session.on("offer", (offer) => {
-    void receiveOffer(offer, targetDir).catch((error) => {
+    void receiveOffer(offer, targetDir, completedUploads).catch((error) => {
       try {
         session.abort();
       } catch {}
@@ -149,19 +154,22 @@ async function runWindowsBridge(targetDir) {
   });
 }
 
-async function receiveOffer(offer, targetDir) {
+async function receiveOffer(offer, targetDir, completedUploads) {
   const details = offer.get_details();
   const originalName = details.name;
   const localName = basenameSafe(originalName);
   const outputPath = path.join(targetDir, localName);
   const fd = fs.openSync(outputPath, "w", details.mode ? details.mode & 0o777 : 0o644);
+  let receivedBytes = 0;
 
   debug(`receiving ${originalName} -> ${outputPath}`);
 
   try {
     await offer.accept({
       on_input: (payload) => {
-        fs.writeSync(fd, Buffer.from(payload));
+        const buffer = Buffer.from(payload);
+        fs.writeSync(fd, buffer);
+        receivedBytes += buffer.length;
       },
     });
   } finally {
@@ -172,11 +180,16 @@ async function receiveOffer(offer, targetDir) {
     fs.utimesSync(outputPath, new Date(), details.mtime);
   }
 
+  completedUploads.push({ path: outputPath, size: receivedBytes });
   debug(`received ${outputPath}`);
 }
 
 function debug(message) {
   appendDebugLog(message);
+}
+
+function formatByteCount(bytes) {
+  return `${Number(bytes || 0).toLocaleString()} bytes`;
 }
 
 main().catch((error) => {

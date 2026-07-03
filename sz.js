@@ -31,6 +31,7 @@ async function main() {
   let writeQueue = Promise.resolve();
   let queuedOutputBytes = 0;
   let lastQueuedOutputLog = 0;
+  const completedDownloads = [];
   const queueWriteOctets = (octets) => {
     const length = Buffer.isBuffer(octets) ? octets.length : octets.length || 0;
     queuedOutputBytes += length;
@@ -72,6 +73,10 @@ async function main() {
     restoreStdin();
     if (error) {
       stderr(String(error && error.stack ? error.stack : error));
+    } else if (code === 0) {
+      for (const file of completedDownloads) {
+        stderr(`downloaded ${file.name} (${formatByteCount(file.size)})`);
+      }
     }
     process.exitCode = code;
   };
@@ -136,7 +141,8 @@ async function main() {
         continue;
       }
 
-      await sendFilePayload(file.fullPath, transfer, waitForOutput, file.size);
+      const sentBytes = await sendFilePayload(file.fullPath, transfer, waitForOutput, file.size);
+      completedDownloads.push({ name: file.name, size: sentBytes });
       debug(`sent ${file.name}`);
       remainingBytes -= file.size;
     }
@@ -249,10 +255,15 @@ async function sendFilePayload(filePath, transfer, waitForOutput, fileSize) {
   await waitForOutput("transfer end");
   await endPromise;
   debug("sz debug: transfer.end complete");
+  return sentBytes;
 }
 
 function debug(message) {
   appendDebugLog(message);
+}
+
+function formatByteCount(bytes) {
+  return `${Number(bytes || 0).toLocaleString()} bytes`;
 }
 
 main().catch((error) => {
