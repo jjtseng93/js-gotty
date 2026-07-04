@@ -30,14 +30,14 @@ Target:
   Accepts http(s) page URLs or ws(s) WebSocket URLs.
 
 Options:
+  -ls                                
+    List reconnectable sessions and exit
   -r, --reconnect-token <token|pid> 
     Resume a session by token or PID
   -d, --detach <token|pid>
     Disconnect the active writer for a session and exit
   -k, --kill <token|pid>
     Terminate the session PTY for a token or PID
-  -ls                                
-    List reconnectable sessions and exit
   
   -c, --credential <user:pass>       
     GoTTY credential/AuthToken

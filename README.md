@@ -1,4 +1,4 @@
-# js-gotty / gotty.js
+# jsgotty / gotty.js
 
 [English README](README.en.md)
 
@@ -39,25 +39,25 @@
 ## Intro 介紹
 - 這是用 JavaScript / Bun 重新實作的 GoTTY 相容伺服器
 - 參考了原本的GoTTY的程式碼 大部分以Codex生成
-- 包含已針對 `js-gotty` 調整過的前端與 WebTTY 協定實作
+- 包含已針對 `jsgotty` 調整過的前端與 WebTTY 協定實作
 - .
 - 原版repo:
 - https://github.com/sorenisanerd/gotty
 
 ### Features 特色功能
 - Resumable reconnect: 瀏覽器斷線後可以用 reconnect token 接回原本的 shell / PTY，而不是重開一個新的 shell。
+  * jsgotty伺服器端支援兩種連線模式
+  * 正常模式、工作階段(session)模式
+  * 當命令列參數包含--reconnect或是--session會啟用工作階段模式
+  * 見下方詳細說明兩種模式
 - Kitty Graphics Protocol: 可以顯示終端內嵌圖片
   * 像是用 `bun viu.mjs 1.png` 直接在終端中顯示圖片。
   * Windows不是使用Kitty協定，而是自訂協議
-- ZMODEM / `rz/sz`: 可以從瀏覽器端選檔並上傳到遠端shell
+- ZMODEM / `rz/sz` 上傳/下載功能
+  * 可以從瀏覽器端選檔並上傳到遠端shell
   * 也可以從遠端shell下載檔案
   * Windows不是使用ZMODEM，而是自訂協議
-
-### PTY Backends PTY後端策略
-- Linux / macOS: 使用 Bun 內建 PTY `Bun.spawn(..., { terminal: ... })`
-- Windows: 使用patched `node-pty`，但整體以 `bun` 啟動 `gotty.js`
-  * 將來會全面使用 Bun
-
+  * 目前Linux系統實測能上傳/下載約80MB的bun binary
 
 ## Usage 用法
 
@@ -73,15 +73,20 @@
 ```sh
 bun gotty.js -w bash
 bun gotty.js -w --credential user:pass bash
+bun gotty.js -w -p 8000 fish
+
+# ↓將會開啟工作階段(session)模式
 bun gotty.js -w --reconnect fish
 bun gotty.js -w --reconnect --reconnect-time 30 fish
 bun gotty.js -w --reconnect --reconnect-time -1 fish
-bun gotty.js -w -p 8000 fish
 
-# or npx jsgotty@latest
+# 或 npx jsgotty@latest
 
-# show help
+# 顯示伺服器/瀏覽器端的幫助
 bun gotty.js
+bun gotty.js --help
+bun gotty.js --help-web
+# ↑瀏覽器端可導覽到/help查看
 ```
 
 ### Windows
@@ -90,14 +95,19 @@ bun gotty.js
 bun gotty.js -w cmd.exe
 bun gotty.js -w powershell
 
+# ↓將會開啟工作階段(session)模式
+bun gotty.js --reconnect powershell
+
 # or npx jsgotty@latest
 
-# show help
+# 顯示伺服器/瀏覽器端的幫助
 bun gotty.js
-bun gotty.js -h
+bun gotty.js --help
+bun gotty.js --help-web
+# ↑瀏覽器端可導覽到/help查看
 ```
 
-### Built-in tools
+### 內建工具
 
 ```sh
 bun gotty.js --rz
@@ -106,14 +116,19 @@ bun gotty.js --viu
 bun gotty.js --client
 ```
 
-- `--rz` starts `rz.js`
-- `--sz` starts `sz.js`
-- `--viu` starts `viu.mjs`
-- `--client` starts `client.mjs`
+- `--rz` starts `rz.js`: 上傳檔案
+- `--sz` starts `sz.js`: 下載指定檔案
+- `--viu` starts `viu.mjs`: 顯示圖片
+- `--client` starts `client.mjs`: 命令列客戶端
 
-### CLI Client
+### 命令列客戶端 CLI Client
 
-`client.mjs` 是可直接連接 GoTTY 的互動式終端 client。基本連線相容 Golang GoTTY；session 列表、writer 管理與遠端終止 PTY 則需要本專案的 js-gotty server。
+- `client.mjs` 是可直接連接 GoTTY 的互動式終端 client
+- 基本連線相容 Golang GoTTY
+- session 列表、writer 管理與遠端終止 PTY 則需要本專案的 jsgotty server
+- 正常模式與工作階段(session)模式的差異，請見下方詳細說明兩種模式。
+
+#### 基本操作：連接伺服器
 
 ```sh
 # 連接預設 ws://127.0.0.1:8080/ws
@@ -129,32 +144,36 @@ bun gotty.js --client https://example.com/terminal/
 bun gotty.js --client -c user:pass 8081
 ```
 
-連線後，第一個可寫入的 client 會成為 writer，其餘連線為唯讀 viewer。也可使用 `--readonly` 主動以 viewer 身分連線。client 會顯示目前的 writer/viewer 權限；server 啟用 `--reconnect` 時，還會顯示 session PID 與 reconnect token。
+#### 進階操作：工作階段管理
 
 ```sh
-# 使用 reconnect token 或 PID 接回既有 session
-bun gotty.js --client -r <token|pid> [target]
-
 # 列出目前 sessions
 bun gotty.js --client -ls [target]
 
+# 使用 reconnect token 或 PID 接回既有 session
+# 需開啟session模式
+bun gotty.js --client -r <token|pid> [target]
+
 # 中斷目前 writer，但保留 PTY session
+# 需開啟session模式
 bun gotty.js --client -d <token|pid> [target]
 
 # 終止對應的 PTY session
 bun gotty.js --client -k <token|pid> [target]
 ```
 
-- `-r` 可接回既有 session；PID 查找是 js-gotty 擴充功能。
 - `-ls` 讀取 server 的 `/css.md` session 列表。
-- 使用瀏覽器查看 session 列表時請開啟 `/css`。
-- 如果 `/css` 顯示的是靜態檔案列表而不是 sessions，代表連線的是 Golang GoTTY，不是 js-gotty。
-- `-d` 需要 server 啟用 `--reconnect`，中斷 writer 後 session 仍保留，其他 client 可接手。
+- 使用瀏覽器查看 session 列表時請導覽到 `/css`。
+- 如果 `/css` 顯示的是靜態檔案列表而不是 sessions，代表連線的是 Golang GoTTY，不是 jsgotty。
+- `-r` 可接回指定的 PTY session 需開啟session模式
+- `-d` 中斷指定 session 的 writer 後 session 仍保留，下一個可寫 client 可接手。需開啟session模式
 - `-k` 會直接終止對應 PTY/session。
+
 - `--arg <value>` 可重複指定 command arguments；`--arguments <query>` 可傳入原始 query string。
 - `--cols`、`--rows` 可指定初始終端大小。
 - 可用 `GOTTY_CREDENTIAL` 與 `GOTTY_RECONNECT_TOKEN` 環境變數設定 credential 和 reconnect token。
-- Golang GoTTY 不支援 `-ls`、`-d`、`-k` 這些 js-gotty 控制協議。
+- PTY 建立方式、writer/viewer 權限與 reconnect 保留時間請參考上方「正常模式 / 工作階段(session)模式」。
+- Golang GoTTY 不支援 `-ls`、`-r`、`-d`、`-k` 這些 jsgotty 控制協議。
 
 ### Wrapper
 - wgotty is a wrapper for Linux
@@ -164,6 +183,47 @@ bun gotty.js --client -k <token|pid> [target]
 - detect installation status of Bun
 - and show installation script if needed
 
+## 正常模式 / 工作階段(session)模式
+
+`jsgotty` 伺服器有兩種連線模式：
+
+- 正常模式: 未指定 `--reconnect` 或 `--session`
+- 工作階段(session)模式: 指定 `--reconnect` 或 `--session`
+
+### 正常模式
+
+- 每一個新的瀏覽器或 `client.mjs` 連線，都會建立一個新的 `PtySession` 與新的 PTY。
+- 兩個 client 同時連線時，通常就是兩個不同的 shell / PTY，彼此不共享畫面、輸入或行程狀態。
+- client 斷線後，對應的 PTY session 會被關閉。
+- 如果瀏覽器被關閉、tab 被關閉、或 websocket 正常斷線，server 會清理該連線對應的 PTY。
+- 正常模式不支援接回既有 PTY；瀏覽器或 CLI 傳入 reconnect token / PID 時，不會 resume 原 session，而是開新的 PTY。
+- `/css` 與 `/css.md` 仍會列出目前 active sessions 的 PID 與 command name，但不提供 reconnect token 或接回連結。
+- `client.mjs -ls` 可列出 sessions；`-k <pid>` 可用 PID 終止 session；`-r` 與 `-d` 需要工作階段模式。
+
+### 工作階段(session)模式
+
+- 使用 `--reconnect` 或 `--session` 啟用。
+- 第一次連線如果沒有指定可 resume 的 token / PID，server 會建立新的 `PtySession` 與新的 PTY。
+- server 會替每個 session 產生 reconnect token，並把 session PID 與 token 傳給前端。
+- 之後瀏覽器或 CLI 可以用 reconnect token 或 PID 接回同一個 PTY，而不是建立新的 shell。
+- 在同一個 PTY session 裡可以有多個 client 同時連線。
+- 第一個可寫入的 client 會成為 writer，可以送鍵盤輸入、resize、ZMODEM 控制等資料到 PTY。
+- 其他 client 會是 viewer，只接收畫面輸出，不會寫入 PTY。
+- client 也可以用 `--readonly` 主動以 viewer 身分連線。
+- 如果 writer 斷線但 session 還有其他 viewer，既有 viewer 不會自動升級為 writer；下一個可寫入且接回同一 session 的 client 可以成為新的 writer。
+- 最後一個 client 斷線後，PTY 是否保留由 `--reconnect-time` 決定。
+
+#### `--reconnect-time` 的行為：
+- `> 0`: 最後一個 client 斷線後保留指定秒數，期間可接回，逾時後關閉 PTY。
+- `= 0`: 最後一個 client 斷線後立刻關閉 PTY。
+- `< 0`: 最後一個 client 斷線後無限期保留 PTY，直到 shell 自己結束、手動 `-k` 終止、或 server 停止。
+
+#### 前端的 reconnect 行為：
+- `reconnect-time > 0` 時，會在期限內自動重試多次。
+- `reconnect-time < 0` 時，會每 1 分鐘自動重試一次。
+- 斷線時會提供 `Reconnect` 按鈕，可手動立即重試。
+- 該按鈕右鍵/長按可輸入自訂 reconnect token 或 PID。
+
 ## Tested platforms 已測試作業系統
 - Windows x64: Windows 11
 - Linux x64: CachyOS
@@ -171,28 +231,18 @@ bun gotty.js --client -k <token|pid> [target]
 - Android arm64: My App
   * https://drive.google.com/drive/folders/18iwbKrAZfA-HoTSP9I5MzGz5xVFMZ4bg
 
+
 ## Current implementation 目前實做
 - 使用node原生 `http`/`https`
 - 使用 `ws` 處理 WebSocket upgrade
 - 使用 `./static` 內自帶前端頁面、kitty overlay 與 WebTTY/ZMODEM 前端邏輯
-- 支援 reconnect token 與 session resume，可接回原本 shell
 - 支援輸出圖片到終端
 - 支援檔案上傳/下載
 
-### Reconnect / Resume 重新連接
-- `--reconnect` 不是單純重開 websocket，而是讓 server 保留目前 PTY session，瀏覽器重新連上時可接回原本 shell。
-- server 會為每個 reconnectable session 產生一個 reconnect token。前端會自動保存這個 token，重連時優先嘗試接回原 session。
-- `--reconnect-time` 的語意：
-  * `> 0`: 斷線後保留 session 指定秒數
-  * `= 0`: 不保留 session
-  * `< 0`: 無限期保留 session，直到 shell 自己結束或 server 被停止
-- 前端的 reconnect 行為：
-  * `reconnect-time > 0` 時，會在期限內自動重試多次
-  * `reconnect-time < 0` 時，會每 1 分鐘自動重試一次
-  * overlay 會提供 `Reconnect` 按鈕，可手動立即重試
-  * 該按鈕右鍵/長按可輸入自訂reconnect token
-- 目前 reconnect 是「接回現有 shell」，不是「回放斷線期間所有輸出」。斷線期間的輸出不會補送。
-- `--reconnect` 關閉時，`/css` 與 `/css.md` 仍會顯示 PID / command name，只是不會提供 reconnect token 與連結。
+### PTY Backends PTY後端策略
+- Linux / macOS: 使用 Bun 內建 PTY `Bun.spawn(..., { terminal: ... })`
+- Windows: 使用patched `node-pty`，但整體以 `bun` 啟動 `gotty.js`
+  * Bun版本若>=1.3.14會全面使用 Bun 內建 PTY
 
 ### Kitty intro
 - 只要終端程式使用 Kitty Graphics Protocol (Linux) 輸出圖片，前端就會把圖片顯示在終端對應位置。
@@ -201,6 +251,7 @@ bun gotty.js --client -k <token|pid> [target]
 
 ```sh
 bun viu.mjs 1.png
+# or bun gotty.js --viu 1.png
 ```
 
 ### rz upload intro
@@ -208,6 +259,7 @@ bun viu.mjs 1.png
 
 ```sh
 bun rz.js
+# or bun gotty.js --rz
 ```
 
 - 前端會跳出檔案選擇視窗。選擇檔案後，會以 ZMODEM 上傳到目前 shell 所在目錄。
@@ -217,6 +269,7 @@ bun rz.js
 
 ```sh
 bun sz.js file.txt
+# or bun gotty.js --sz file.txt
 ```
 
 - 前端會接收 ZMODEM 下載資料，並讓瀏覽器下載檔案。

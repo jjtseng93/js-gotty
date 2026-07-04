@@ -168,8 +168,8 @@ Options:
   --title-format <value>        Title format 
     (default: {{ .command }}@{{ .hostname }} )
     
-  --reconnect                   Enable reconnecting to the original TTY
-    Useful when the connection is temporarily down
+  --reconnect, --session        Enable session mode
+    Keep the PTY session resumable after the browser disconnects
     (default: disabled)
   --reconnect-time <value>      Time to preserve original TTY (seconds)
     (default: -1 (forever) )
@@ -539,6 +539,7 @@ function parseArgs(argv) {
         options.titleFormat = next();
         break;
       case "--reconnect":
+      case "--session":
         options.reconnect = true;
         break;
       case "--reconnect-time":
