@@ -38,26 +38,25 @@
 
 ## Intro 介紹
 - 這是用 JavaScript / Bun 重新實作的 GoTTY 相容伺服器
-- 參考了原本的GoTTY的程式碼 大部分以Codex生成
+- 參考原本 GoTTY 的程式碼，大部分以 Codex 生成
 - 包含已針對 `jsgotty` 調整過的前端與 WebTTY 協定實作
-- .
-- 原版repo:
+- 原版 repo:
 - https://github.com/sorenisanerd/gotty
 
 ### Features 特色功能
 - Resumable reconnect: 瀏覽器斷線後可以用 reconnect token 接回原本的 shell / PTY，而不是重開一個新的 shell。
-  * jsgotty伺服器端支援兩種連線模式
+  * jsgotty 伺服器端支援兩種連線模式
   * 正常模式、工作階段(session)模式
-  * 當命令列參數包含--reconnect或是--session會啟用工作階段模式
+  * 當命令列參數包含 `--reconnect` 或 `--session` 時會啟用工作階段模式
   * 見下方詳細說明兩種模式
 - Kitty Graphics Protocol: 可以顯示終端內嵌圖片
   * 像是用 `bun viu.mjs 1.png` 直接在終端中顯示圖片。
-  * Windows不是使用Kitty協定，而是自訂協議
+  * Windows 不是使用 Kitty 協定，而是自訂協議
 - ZMODEM / `rz/sz` 上傳/下載功能
-  * 可以從瀏覽器端選檔並上傳到遠端shell
-  * 也可以從遠端shell下載檔案
-  * Windows不是使用ZMODEM，而是自訂協議
-  * 目前Linux系統實測能上傳/下載約80MB的bun binary
+  * 可以從瀏覽器端選檔並上傳到遠端 shell
+  * 也可以從遠端 shell 下載檔案
+  * Windows 不是使用 ZMODEM，而是自訂協議
+  * 目前 Linux 系統實測能上傳/下載約 80MB 的 bun binary
 
 ## Usage 用法
 
@@ -98,7 +97,7 @@ bun gotty.js -w powershell
 # ↓將會開啟工作階段(session)模式
 bun gotty.js --reconnect powershell
 
-# or npx jsgotty@latest
+# 或 npx jsgotty@latest
 
 # 顯示伺服器/瀏覽器端的幫助
 bun gotty.js
@@ -151,11 +150,11 @@ bun gotty.js --client -c user:pass 8081
 bun gotty.js --client -ls [target]
 
 # 使用 reconnect token 或 PID 接回既有 session
-# 需開啟session模式
+# 需開啟 session 模式
 bun gotty.js --client -r <token|pid> [target]
 
 # 中斷目前 writer，但保留 PTY session
-# 需開啟session模式
+# 需開啟 session 模式
 bun gotty.js --client -d <token|pid> [target]
 
 # 終止對應的 PTY session
@@ -165,14 +164,14 @@ bun gotty.js --client -k <token|pid> [target]
 - `-ls` 讀取 server 的 `/css.md` session 列表。
 - 使用瀏覽器查看 session 列表時請導覽到 `/css`。
 - 如果 `/css` 顯示的是靜態檔案列表而不是 sessions，代表連線的是 Golang GoTTY，不是 jsgotty。
-- `-r` 可接回指定的 PTY session 需開啟session模式
-- `-d` 中斷指定 session 的 writer 後 session 仍保留，下一個可寫 client 可接手。需開啟session模式
+- `-r` 需開啟 session 模式；可接回指定的 PTY session。
+- `-d` 需開啟 session 模式；中斷指定 session 的 writer 後，session 仍保留，下一個可寫 client 可接手。
 - `-k` 會直接終止對應 PTY/session。
 
 - `--arg <value>` 可重複指定 command arguments；`--arguments <query>` 可傳入原始 query string。
 - `--cols`、`--rows` 可指定初始終端大小。
 - 可用 `GOTTY_CREDENTIAL` 與 `GOTTY_RECONNECT_TOKEN` 環境變數設定 credential 和 reconnect token。
-- PTY 建立方式、writer/viewer 權限與 reconnect 保留時間請參考上方「正常模式 / 工作階段(session)模式」。
+- PTY 建立方式、writer/viewer 權限與 reconnect 保留時間請參考下方「正常模式 / 工作階段(session)模式」。
 - Golang GoTTY 不支援 `-ls`、`-r`、`-d`、`-k` 這些 jsgotty 控制協議。
 
 ### Wrapper
