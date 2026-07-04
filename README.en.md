@@ -162,6 +162,13 @@ bun gotty.js --client -d <token|pid> [target]
 bun gotty.js --client -k <token|pid> [target]
 ```
 
+The first argument can also use subcommand aliases:
+
+- `ls`, `list`, `list-sessions` => `-ls`
+- `attach`, `a <token|pid>` => `-r <token|pid>`
+- `detach <token|pid>` => `-d <token|pid>`
+- `kill-session`, `stop <token|pid>` => `-k <token|pid>`
+
 - `-ls` reads the server's `/css.md` session list.
 - Open `/css` to view the session list in a browser.
 - If `/css` shows a static file list instead of sessions, the server is Golang GoTTY, not jsgotty.

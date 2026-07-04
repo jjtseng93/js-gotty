@@ -54,6 +54,12 @@ Options:
   -h, --help                        
     Show help
 
+Subcommand aliases:
+  ls, list, list-sessions        => -ls
+  attach, a <token|pid>          => -r <token|pid>
+  detach <token|pid>             => -d <token|pid>
+  kill-session, stop <token|pid> => -k <token|pid>
+
 Environment:
   GOTTY_CREDENTIAL
   GOTTY_RECONNECT_TOKEN`);

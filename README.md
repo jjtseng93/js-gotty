@@ -161,6 +161,13 @@ bun gotty.js --client -d <token|pid> [target]
 bun gotty.js --client -k <token|pid> [target]
 ```
 
+第一個參數也可使用 subcommand alias:
+
+- `ls`、`list`、`list-sessions` => `-ls`
+- `attach`、`a <token|pid>` => `-r <token|pid>`
+- `detach <token|pid>` => `-d <token|pid>`
+- `kill-session`、`stop <token|pid>` => `-k <token|pid>`
+
 - `-ls` 讀取 server 的 `/css.md` session 列表。
 - 使用瀏覽器查看 session 列表時請導覽到 `/css`。
 - 如果 `/css` 顯示的是靜態檔案列表而不是 sessions，代表連線的是 Golang GoTTY，不是 jsgotty。
