@@ -37,11 +37,14 @@
 - for copying text on mobile devices
 
 ## Intro 介紹
-- 這是用 JavaScript / Bun 重新實作的 GoTTY 相容伺服器
-- 參考原本 GoTTY 的程式碼，大部分以 Codex 生成
+- 本專案旨在透過瀏覽器、命令列用戶端與現代 Web 協定，讓你的終端機隨處可用。
+- 它是用 JavaScript / Bun 重新實作的 GoTTY 相容伺服器
+- 參考了原本 GoTTY 的程式碼，大部分以 Codex 生成
 - 包含已針對 `jsgotty` 調整過的前端與 WebTTY 協定實作
 - 原版 repo:
 - https://github.com/sorenisanerd/gotty
+- .
+- 關鍵字: 終端機 瀏覽器 命令列用戶端 工作階段管理 Kitty圖形協議 ZMODEM
 
 ### Features 特色功能
 - Resumable reconnect: 瀏覽器斷線後可以用 reconnect token 接回原本的 shell / PTY，而不是重開一個新的 shell。
