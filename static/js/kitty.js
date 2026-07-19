@@ -19,8 +19,52 @@
     touchBound: false,
     touchScroll: null,
     contextMenu: null,
-    imageContextBound: false
+    imageContextBound: false,
+    socket: null
   };
+
+  function browserTerminalState() {
+    const xterm = terminal && terminal.__gottyXterm;
+    const active = xterm && xterm.buffer && xterm.buffer.active;
+    if (!active) {
+      return null;
+    }
+    const { screen, viewport } = xtermElements();
+    const terminalRect = terminal.getBoundingClientRect();
+    const screenRect = screen && screen.getBoundingClientRect();
+    const viewportRect = viewport && viewport.getBoundingClientRect();
+    return {
+      type: active.type || null,
+      baseY: active.baseY,
+      viewportY: active.viewportY,
+      cursorX: active.cursorX,
+      cursorY: active.cursorY,
+      cursorCol: active.cursorX + 1,
+      cursorRow: active.cursorY + 1,
+      absoluteCursorRow: active.baseY + active.cursorY + 1,
+      windowInnerWidth: window.innerWidth,
+      documentClientWidth: document.documentElement.clientWidth,
+      terminalWidth: terminalRect.width,
+      screenWidth: screenRect?.width ?? null,
+      viewportWidth: viewportRect?.width ?? null,
+      viewportClientWidth: viewport?.clientWidth ?? null,
+      viewportScrollWidth: viewport?.scrollWidth ?? null,
+    };
+  }
+
+  function sendBrowserDebug(stage, details = {}) {
+    const socket = state.socket;
+    if (!socket || socket.readyState !== 1) {
+      return;
+    }
+    try {
+      socket.send("K" + JSON.stringify({
+        stage,
+        terminal: browserTerminalState(),
+        ...details,
+      }));
+    } catch (error) {}
+  }
 
   function xtermElements() {
     if (!terminal) {
@@ -98,34 +142,63 @@
     return `${imageId}:${control.p || "0"}`;
   }
 
-  function currentCursorPosition() {
-    const xterm = terminal && terminal.__gottyXterm;
-    const active = xterm && xterm.buffer && xterm.buffer.active;
-    if (!active) {
-      return null;
-    }
-    return {
-      bufferRow: active.baseY + active.cursorY + 1,
-      col: active.cursorX + 1
-    };
-  }
-
   function currentViewportY() {
     const xterm = terminal && terminal.__gottyXterm;
     const active = xterm && xterm.buffer && xterm.buffer.active;
     return active ? active.viewportY : 0;
   }
 
-  function createPlacementMarker() {
+  function createPlacementMarker(cursor) {
     const xterm = terminal && terminal.__gottyXterm;
     if (!xterm || typeof xterm.registerMarker !== "function") {
       return null;
     }
     try {
-      return xterm.registerMarker(0);
+      const active = xterm.buffer && xterm.buffer.active;
+      let offset = 0;
+      if (active && cursor && Number.isFinite(cursor.bufferRow)) {
+        const currentBufferRow = active.baseY + active.cursorY + 1;
+        offset = Math.trunc(cursor.bufferRow - currentBufferRow);
+      } else if (
+        active && cursor && Number.isFinite(cursor.row) &&
+        cursor.row >= 1 && cursor.row <= state.rows
+      ) {
+        // Kitty's cursor row is 1-based within the live terminal screen.
+        // registerMarker() takes an offset from xterm's current 0-based row.
+        offset = Math.trunc(cursor.row - (active.cursorY + 1));
+      }
+      const marker = xterm.registerMarker(offset);
+      sendBrowserDebug("marker-created", {
+        protocolCursor: cursor,
+        offset,
+        markerLine: marker?.line ?? null,
+      });
+      return marker;
     } catch (error) {
       return null;
     }
+  }
+
+  function disposePlacementMarker(node) {
+    if (!node || !node.__kittyMarker) {
+      return;
+    }
+    try {
+      node.__kittyMarker.dispose();
+    } catch (error) {
+      // The marker may already have been disposed by xterm buffer trimming.
+    }
+    node.__kittyMarker = null;
+  }
+
+  function removePlacementNode(node) {
+    if (!node) {
+      return;
+    }
+    disposePlacementMarker(node);
+    node.__kittyGeneration = (node.__kittyGeneration || 0) + 1;
+    revokeNodeUrl(node);
+    node.remove();
   }
 
   function decodeRawImage(image) {
@@ -197,6 +270,35 @@
     });
   }
 
+  function sourceRectangle(width, height, control = {}) {
+    const sourceWidth = Math.max(1, Math.trunc(Number(width) || 1));
+    const sourceHeight = Math.max(1, Math.trunc(Number(height) || 1));
+    const requestedX = Math.max(0, Math.trunc(Number.parseInt(control.x || "0", 10) || 0));
+    const requestedY = Math.max(0, Math.trunc(Number.parseInt(control.y || "0", 10) || 0));
+    const requestedWidth = Math.max(0, Math.trunc(Number.parseInt(control.w || "0", 10) || 0));
+    const requestedHeight = Math.max(0, Math.trunc(Number.parseInt(control.h || "0", 10) || 0));
+    const right = requestedWidth > 0 ? requestedX + requestedWidth : sourceWidth;
+    const bottom = requestedHeight > 0 ? requestedY + requestedHeight : sourceHeight;
+    const x = Math.min(sourceWidth, requestedX);
+    const y = Math.min(sourceHeight, requestedY);
+    const clippedRight = Math.min(sourceWidth, Math.max(x, right));
+    const clippedBottom = Math.min(sourceHeight, Math.max(y, bottom));
+    const cropWidth = clippedRight - x;
+    const cropHeight = clippedBottom - y;
+    if (cropWidth < 1 || cropHeight < 1) {
+      return null;
+    }
+    return {
+      x,
+      y,
+      width: cropWidth,
+      height: cropHeight,
+      sourceWidth,
+      sourceHeight,
+      cropped: x !== 0 || y !== 0 || cropWidth !== sourceWidth || cropHeight !== sourceHeight,
+    };
+  }
+
   async function blobDimensions(blob) {
     if (typeof createImageBitmap === "function") {
       const bitmap = await createImageBitmap(blob);
@@ -224,23 +326,35 @@
     });
   }
 
-  async function resolveImageAsset(image) {
+  async function resolveImageAsset(image, control = {}) {
     if (!image) {
       return null;
     }
+    let blob;
+    let dimensions;
     if (image.format === 100) {
-      const blob = new Blob([binaryFromBase64(image.data)], {
+      blob = new Blob([binaryFromBase64(image.data)], {
         type: inferBlobMimeType(image, image.control || {})
       });
-      const dimensions = await blobDimensions(blob);
-      return { blob, width: dimensions.width, height: dimensions.height };
+      dimensions = await blobDimensions(blob);
+    } else {
+      const canvas = decodeRawImage(image);
+      if (!canvas) {
+        return null;
+      }
+      blob = await canvasToBlob(canvas);
+      dimensions = { width: canvas.width, height: canvas.height };
     }
-    const canvas = decodeRawImage(image);
-    if (!canvas) {
+    const sourceRect = sourceRectangle(dimensions.width, dimensions.height, control);
+    if (!sourceRect) {
       return null;
     }
-    const blob = await canvasToBlob(canvas);
-    return { blob, width: canvas.width, height: canvas.height };
+    return {
+      blob,
+      width: sourceRect.width,
+      height: sourceRect.height,
+      sourceRect,
+    };
   }
 
   function revokeNodeUrl(node) {
@@ -254,22 +368,116 @@
     if (!node || !node.__kittyPlacement) {
       return;
     }
-    const { control, cursor, intrinsicWidth, intrinsicHeight } = node.__kittyPlacement;
+    const { control, cursor, intrinsicWidth, intrinsicHeight, sourceRect } = node.__kittyPlacement;
     const metrics = cellMetrics();
     const anchor = anchorOffset();
-    const cols = Number.parseInt(control.c || "0", 10) || Math.max(1, Math.round(intrinsicWidth / Math.max(1, metrics.width)));
-    const rows = Number.parseInt(control.r || "0", 10) || Math.max(1, Math.round(intrinsicHeight / Math.max(1, metrics.height)));
+    const controlCols = Math.max(0, Number.parseInt(control.c || "0", 10) || 0);
+    const controlRows = Math.max(0, Number.parseInt(control.r || "0", 10) || 0);
+    let requestedCols;
+    let requestedRows;
+    if (controlCols > 0 && controlRows > 0) {
+      requestedCols = controlCols;
+      requestedRows = controlRows;
+    } else if (controlCols > 0) {
+      requestedCols = controlCols;
+      requestedRows = Math.max(1, Math.round(
+        controlCols * metrics.width * intrinsicHeight / intrinsicWidth / metrics.height,
+      ));
+    } else if (controlRows > 0) {
+      requestedRows = controlRows;
+      requestedCols = Math.max(1, Math.round(
+        controlRows * metrics.height * intrinsicWidth / intrinsicHeight / metrics.width,
+      ));
+    } else {
+      requestedCols = Math.max(1, Math.round(intrinsicWidth / Math.max(1, metrics.width)));
+      requestedRows = Math.max(1, Math.round(intrinsicHeight / Math.max(1, metrics.height)));
+    }
+    const xterm = terminal && terminal.__gottyXterm;
+    const viewerCols = Math.max(1, Math.trunc(Number(xterm?.cols) || state.cols));
+    const viewerRows = Math.max(1, Math.trunc(Number(xterm?.rows) || state.rows));
+    const cursorCol = Math.max(1, Math.trunc(Number(cursor?.col) || 1));
+    // A fixed-width PTY may be wider than the browser's xterm instance. Match
+    // viu's final-column safety margin using the viewer's real column count,
+    // then scale both axes so the image is visible rather than merely clipped.
+    const availableViewerCols = Math.max(1, viewerCols - cursorCol);
+    const scale = Math.min(1, availableViewerCols / requestedCols);
+    const cols = Math.max(1, Math.min(requestedCols, availableViewerCols));
+    const rows = Math.max(1, Math.round(requestedRows * scale));
     const marker = node.__kittyMarker;
-    const row = marker && !marker.isDisposed && Number.isFinite(marker.line)
-      ? marker.line - currentViewportY() + 1
+    const activeBuffer = xterm?.buffer?.active;
+    const useProtocolRow = activeBuffer?.type === "alternate" && cursor && Number.isFinite(cursor.row);
+    const row = useProtocolRow
+      ? cursor.row
+      : marker && !marker.isDisposed && Number.isFinite(marker.line)
+        ? marker.line - currentViewportY() + 1
       : cursor && Number.isFinite(cursor.bufferRow)
         ? cursor.bufferRow - currentViewportY()
         : (cursor && cursor.row) || 1;
+    // Fixed-size PTYs can have more rows than the browser-side xterm. Leave
+    // the viewer's final row for the TUI status line in that mismatch mode.
+    const viewerBottomRow = Math.max(1, viewerRows - (viewerRows < state.rows ? 1 : 0));
+    const visibleRows = Math.max(0, Math.min(rows, viewerBottomRow - row + 1));
+    node.style.display = visibleRows > 0 ? "block" : "none";
     node.style.left = `${anchor.left + (Math.max(1, cursor.col) - 1) * metrics.width}px`;
     node.style.top = `${anchor.top + (row - 1) * metrics.height}px`;
     node.style.width = `${cols * metrics.width}px`;
-    node.style.height = `${rows * metrics.height}px`;
+    node.style.height = `${visibleRows * metrics.height}px`;
     node.style.zIndex = String(Number.parseInt(control.z || "0", 10) || 0);
+    const imageElement = node.__kittyImageElement;
+    if (imageElement && sourceRect) {
+      const targetWidth = cols * metrics.width;
+      const targetHeight = rows * metrics.height;
+      const sourceScaleX = targetWidth / sourceRect.width;
+      const sourceScaleY = targetHeight / sourceRect.height;
+      imageElement.style.left = `${-sourceRect.x * sourceScaleX}px`;
+      imageElement.style.top = `${-sourceRect.y * sourceScaleY}px`;
+      imageElement.style.width = `${sourceRect.sourceWidth * sourceScaleX}px`;
+      imageElement.style.height = `${sourceRect.sourceHeight * sourceScaleY}px`;
+    }
+    const { screen, viewport } = xtermElements();
+    const overlayRect = overlay.getBoundingClientRect();
+    const terminalRect = terminal.getBoundingClientRect();
+    const screenRect = screen && screen.getBoundingClientRect();
+    const viewportRect = viewport && viewport.getBoundingClientRect();
+    sendBrowserDebug("layout", {
+      imageId: control.i || control.I || null,
+      placementId: control.p || null,
+      requestedCols,
+      requestedRows,
+      viewerCols,
+      viewerRows,
+      viewerBottomRow,
+      terminalVisibleRows: visibleRows,
+      availableViewerCols,
+      viewerScale: scale,
+      positionSource: useProtocolRow ? "protocol" : "marker",
+      sourceRect: sourceRect || null,
+      protocolCursor: cursor,
+      markerLine: marker?.line ?? null,
+      markerDisposed: marker?.isDisposed ?? null,
+      currentViewportY: currentViewportY(),
+      selectedRow: row,
+      cssLeft: node.style.left,
+      cssTop: node.style.top,
+      cssWidth: node.style.width,
+      cssHeight: node.style.height,
+      cellWidth: metrics.width,
+      cellHeight: metrics.height,
+      geometry: {
+        windowInnerWidth: window.innerWidth,
+        documentClientWidth: document.documentElement.clientWidth,
+        terminalWidth: terminalRect.width,
+        screenWidth: screenRect?.width ?? null,
+        viewportWidth: viewportRect?.width ?? null,
+        viewportClientWidth: viewport?.clientWidth ?? null,
+        viewportScrollWidth: viewport?.scrollWidth ?? null,
+        overlayWidth: overlayRect.width,
+        overlayClientWidth: overlay.clientWidth,
+        overlayScrollWidth: overlay.scrollWidth,
+        overlayComputedWidth: getComputedStyle(overlay).width,
+        overlayOverflow: getComputedStyle(overlay).overflow,
+      },
+    });
   }
 
   function relayoutAll() {
@@ -297,7 +505,10 @@
     if (!viewport) {
       return;
     }
-    viewport.addEventListener("scroll", relayoutAll, { passive: true });
+    viewport.addEventListener("scroll", () => {
+      sendBrowserDebug("viewport-scroll", { currentViewportY: currentViewportY() });
+      relayoutAll();
+    }, { passive: true });
     state.scrollBound = true;
   }
 
@@ -455,8 +666,7 @@
       }
       const node = state.placements.get(state.contextMenu.targetKey);
       if (node) {
-        revokeNodeUrl(node);
-        node.remove();
+        removePlacementNode(node);
         state.placements.delete(state.contextMenu.targetKey);
       }
       hideContextMenu();
@@ -577,15 +787,25 @@
     const key = placementKey(message);
     const control = message.control || {};
     const cursor = message.bufferCursor || message.cursor || { row: 1, col: 1 };
+    sendBrowserDebug("placement-start", {
+      key,
+      control,
+      protocolCursor: message.cursor || null,
+      selectedCursor: cursor,
+    });
     if (message.image) {
       message.image.control = control;
     }
 
     let node = state.placements.get(key);
     if (!node) {
-      node = document.createElement("img");
+      node = document.createElement("div");
       node.className = "kitty-image";
-      node.alt = "";
+      const imageElement = document.createElement("img");
+      imageElement.className = "kitty-image__content";
+      imageElement.alt = "";
+      node.__kittyImageElement = imageElement;
+      node.appendChild(imageElement);
       node.__kittyObjectUrl = "";
       node.__kittyMarker = null;
       node.addEventListener("contextmenu", (event) => {
@@ -595,12 +815,13 @@
       overlay.appendChild(node);
     }
 
-    if (!node.__kittyMarker) {
-      node.__kittyMarker = createPlacementMarker();
-    }
+    disposePlacementMarker(node);
+    node.__kittyMarker = createPlacementMarker(cursor);
+    const generation = (node.__kittyGeneration || 0) + 1;
+    node.__kittyGeneration = generation;
 
-    const asset = await resolveImageAsset(message.image);
-    if (!asset) {
+    const asset = await resolveImageAsset(message.image, control);
+    if (!asset || node.__kittyGeneration !== generation) {
       return;
     }
     const objectUrl = URL.createObjectURL(asset.blob);
@@ -610,9 +831,10 @@
       control,
       cursor,
       intrinsicWidth: asset.width,
-      intrinsicHeight: asset.height
+      intrinsicHeight: asset.height,
+      sourceRect: asset.sourceRect,
     };
-    node.src = objectUrl;
+    node.__kittyImageElement.src = objectUrl;
     bindViewportScroll();
     bindTerminalRender();
     bindTouchScrolling();
@@ -622,10 +844,13 @@
 
   function deleteImages(message) {
     const info = message.delete || {};
+    sendBrowserDebug("delete", {
+      delete: info,
+      placementKeys: Array.from(state.placements.keys()),
+    });
     if (info.scope === "a") {
       for (const node of state.placements.values()) {
-        revokeNodeUrl(node);
-        node.remove();
+        removePlacementNode(node);
       }
       state.placements.clear();
       return;
@@ -634,8 +859,7 @@
     if (info.imageId) {
       for (const [key, node] of state.placements.entries()) {
         if (key.startsWith(`${info.imageId}:`)) {
-          revokeNodeUrl(node);
-          node.remove();
+          removePlacementNode(node);
           state.placements.delete(key);
         }
       }
@@ -716,8 +940,16 @@
 
   function handleKittyMessage(payload) {
     const message = JSON.parse(payload);
+    sendBrowserDebug("kitty-message", {
+      kind: message.kind,
+      control: message.control || null,
+      protocolCursor: message.cursor || message.delete?.cursor || null,
+      delete: message.delete || null,
+    });
     if (message.kind === "placement") {
-      message.bufferCursor = currentCursorPosition();
+      // The server records this cursor exactly where the Kitty APC occurred.
+      // Do not replace it with xterm's later cursor, which may already have
+      // moved because of redraw or scrolling output queued after the APC.
       placeImage(message);
       return true;
     }
@@ -735,6 +967,7 @@
       return nativeOnOpen.call(this, type, listener, options);
     }
       const wrapped = function (event) {
+        state.socket = this;
         inspectTerminalOutput(event.data);
         if (typeof event.data === "string" && event.data[0] === MSG_KITTY) {
           if (handleKittyMessage(event.data.slice(1))) {
@@ -774,6 +1007,7 @@
         return;
       }
       descriptor.set.call(this, function (event) {
+        state.socket = this;
         inspectTerminalOutput(event.data);
         if (typeof event.data === "string" && event.data[0] === MSG_KITTY) {
           if (handleKittyMessage(event.data.slice(1))) {

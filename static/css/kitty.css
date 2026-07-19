@@ -13,6 +13,13 @@
 #kitty-overlay .kitty-image {
   position: absolute;
   display: block;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+#kitty-overlay .kitty-image__content {
+  position: absolute;
+  display: block;
   max-width: none;
   max-height: none;
   image-rendering: auto;

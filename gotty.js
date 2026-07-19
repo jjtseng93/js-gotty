@@ -33,10 +33,33 @@ const MSG_CONTROL_RESULT = "b";
 const MSG_ZMODEM_MODE = "z";
 const MSG_ZMODEM_OUTPUT = "y";
 const MSG_ZMODEM_ACK = "Y";
+const MSG_KITTY_DEBUG = "K";
 const KITTY_TRACE = process.env.KITTY_TRACE === "1";
 const WINDOWS_BRIDGE_TRACE = process.env.WINDOWS_BRIDGE_TRACE === "1";
 const WINDOWS_BRIDGE_PREFIX = Buffer.from("@@GOTTYCTL:", "ascii");
 const WINDOWS_BRIDGE_SUFFIX = Buffer.from("@@", "ascii");
+const KITTY_PLACEMENT_LOG = path.resolve(__dirname, "kitty-placement.log");
+
+function kittyPlacementLog(stage, details = {}) {
+  try {
+    fs.appendFileSync(KITTY_PLACEMENT_LOG, JSON.stringify({
+      time: new Date().toISOString(),
+      pid: process.pid,
+      stage,
+      ...details,
+    }) + "\n");
+  } catch (error) {
+    // Placement diagnostics must never affect terminal output.
+  }
+}
+
+function cursorControls(buffer) {
+  const text = Buffer.from(buffer).toString("utf8");
+  return Array.from(text.matchAll(/\u001b\[([0-9;?]*)([A-Za-z])/g), (match) => ({
+    params: match[1],
+    final: match[2],
+  })).filter((entry) => "ABCDEFGHfJKhl".includes(entry.final));
+}
 
 const DEFAULTS = {
   address: "0.0.0.0",
@@ -974,11 +997,10 @@ class KittyGraphicsParser {
     ));
   }
 
-  consume(raw, cursor) {
+  consume(raw) {
     const data = this.pending.length > 0 ? Buffer.concat([this.pending, raw]) : raw;
     this.pending = Buffer.alloc(0);
-    const plain = [];
-    const graphics = [];
+    const events = [];
     let offset = 0;
     let plainStart = 0;
 
@@ -986,19 +1008,19 @@ class KittyGraphicsParser {
       if (data[offset] === 0x1b && offset + 2 < data.length && data[offset + 1] === 0x5f && data[offset + 2] === 0x47) {
         const commandEnd = this._findApcEnd(data, offset + 3);
         if (commandEnd === -1) {
+          if (plainStart < offset) {
+            events.push({ kind: "plain", data: data.subarray(plainStart, offset) });
+          }
           this.pending = data.subarray(offset);
           break;
         }
 
         if (plainStart < offset) {
-          plain.push(data.subarray(plainStart, offset));
+          events.push({ kind: "plain", data: data.subarray(plainStart, offset) });
         }
 
         const packet = data.subarray(offset + 3, commandEnd);
-        const parsed = this._parsePacket(packet, cursor);
-        if (parsed) {
-          graphics.push(parsed);
-        }
+        events.push({ kind: "kitty", packet });
 
         offset = commandEnd + 2;
         plainStart = offset;
@@ -1008,10 +1030,14 @@ class KittyGraphicsParser {
     }
 
     if (plainStart < data.length && this.pending.length === 0) {
-      plain.push(data.subarray(plainStart));
+      events.push({ kind: "plain", data: data.subarray(plainStart) });
     }
 
-    return { plain, graphics };
+    return { events };
+  }
+
+  parsePacket(packet, cursor) {
+    return this._parsePacket(packet, cursor);
   }
 
   acknowledge(graphic) {
@@ -1643,47 +1669,82 @@ class PtySession {
         this.sendChunk(MSG_OUTPUT, raw);
         return;
       }
-      const cursorBefore = this.cursorTracker.snapshot();
-      const parsed = this.kittyParser.consume(raw, cursorBefore);
-      if (parsed.graphics.length > 0) {
-        traceLog("graphics", parsed.graphics.map((graphic) => ({
-          kind: graphic.kind,
-          control: graphic.control || null,
-          imageId: graphic.image ? graphic.image.id : null
-        })));
-      }
-      for (const chunk of parsed.plain) {
+      const parsed = this.kittyParser.consume(raw);
+      for (const event of parsed.events) {
+        if (event.kind === "kitty") {
+          const cursorAtApc = this.cursorTracker.snapshot();
+          const graphic = this.kittyParser.parsePacket(event.packet, cursorAtApc);
+          if (!graphic) {
+            continue;
+          }
+          kittyPlacementLog("server-kitty-event", {
+            cursorAtApc,
+            kind: graphic.kind,
+            control: graphic.control || null,
+            delete: graphic.delete || null,
+            imageId: graphic.image?.id || null,
+          });
+          traceLog("graphics", JSON.stringify({
+            kind: graphic.kind,
+            control: graphic.control || null,
+            imageId: graphic.image ? graphic.image.id : null
+          }));
+          if (graphic.kind === "placement") {
+            this.cursorTracker.applyKittyPlacement(graphic.control);
+          }
+          this.send(MSG_KITTY_GRAPHICS, JSON.stringify(graphic));
+          const syntheticCursorMotion = this.buildKittyCursorMotion(graphic);
+          if (syntheticCursorMotion) {
+            this.sendChunk(MSG_OUTPUT, Buffer.from(syntheticCursorMotion, "utf8"));
+          }
+          const ack = this.kittyParser.acknowledge(graphic);
+          if (ack) {
+            traceLog("graphics-ack", JSON.stringify(graphic.control || {}), JSON.stringify(ack));
+            this.backend.write(Buffer.from(ack, "utf8"));
+          }
+          continue;
+        }
+
+        const chunk = event.data;
         const filteredChunk = this.filterEchoedTerminalReplies(chunk);
         if (filteredChunk.length === 0) {
           continue;
         }
         if (!this.supportsWindowsBridge) {
+          const cursorBefore = this.cursorTracker.snapshot();
           this.cursorTracker.consume(filteredChunk);
+          const cursorAfter = this.cursorTracker.snapshot();
+          const controls = cursorControls(filteredChunk);
+          if (controls.length > 0) {
+            kittyPlacementLog("server-plain-cursor-controls", {
+              bytes: filteredChunk.length,
+              cursorBefore,
+              cursorAfter,
+              controls,
+            });
+          }
           this.sendChunk(MSG_OUTPUT, filteredChunk);
           continue;
         }
         const bridged = this.windowsBridgeParser.consume(filteredChunk);
         if (bridged.plain.length > 0) {
+          const cursorBefore = this.cursorTracker.snapshot();
           this.cursorTracker.consume(bridged.plain);
+          const cursorAfter = this.cursorTracker.snapshot();
+          const controls = cursorControls(bridged.plain);
+          if (controls.length > 0) {
+            kittyPlacementLog("server-plain-cursor-controls", {
+              bytes: bridged.plain.length,
+              cursorBefore,
+              cursorAfter,
+              controls,
+              windowsBridge: true,
+            });
+          }
           this.sendChunk(MSG_OUTPUT, bridged.plain);
         }
         for (const control of bridged.controls) {
           this.handleWindowsBridgeControl(control);
-        }
-      }
-      for (const graphic of parsed.graphics) {
-        if (graphic.kind === "placement") {
-          this.cursorTracker.applyKittyPlacement(graphic.control);
-        }
-        this.send(MSG_KITTY_GRAPHICS, JSON.stringify(graphic));
-        const syntheticCursorMotion = this.buildKittyCursorMotion(graphic);
-        if (syntheticCursorMotion) {
-          this.sendChunk(MSG_OUTPUT, Buffer.from(syntheticCursorMotion, "utf8"));
-        }
-        const ack = this.kittyParser.acknowledge(graphic);
-        if (ack) {
-          traceLog("graphics-ack", JSON.stringify(graphic.control || {}), JSON.stringify(ack));
-          this.backend.write(Buffer.from(ack, "utf8"));
         }
       }
     });
@@ -2353,6 +2414,13 @@ class PtySession {
         break;
       case MSG_PING:
         this.send(MSG_PONG, "", ws);
+        break;
+      case MSG_KITTY_DEBUG:
+        try {
+          kittyPlacementLog("browser", JSON.parse(payload));
+        } catch (error) {
+          kittyPlacementLog("browser-malformed", { payload });
+        }
         break;
       case MSG_WINDOWS_BRIDGE: {
         if (!this.supportsWindowsBridge || !this.isWriter(ws) || payload.length === 0) {
@@ -3227,7 +3295,15 @@ async function bootstrap() {
   }
 }
 
-bootstrap().catch((error) => {
-  console.error(String(error && error.stack ? error.stack : error));
-  process.exitCode = 1;
-});
+module.exports.CursorStateTracker = CursorStateTracker;
+module.exports.KittyGraphicsParser = KittyGraphicsParser;
+
+if (require.main === module) {
+  try {
+    fs.writeFileSync(KITTY_PLACEMENT_LOG, "");
+  } catch {}
+  bootstrap().catch((error) => {
+    console.error(String(error && error.stack ? error.stack : error));
+    process.exitCode = 1;
+  });
+}
