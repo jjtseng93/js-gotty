@@ -56,6 +56,7 @@
   * See the detailed mode explanation below.
 - Kitty Graphics Protocol: displays inline terminal images.
   * For example, `bun viu.mjs 1.png` shows an image directly in the terminal.
+  * Set `JSGOTTY_KITTY_DEBUG=1` to write the Kitty image debug log.
   * Windows does not use Kitty protocol; it uses a custom protocol.
 - ZMODEM / `rz/sz`: select files in the browser and upload them to the remote shell.
   * You can also download files from the remote shell.

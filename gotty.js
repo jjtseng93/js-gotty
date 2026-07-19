@@ -34,13 +34,16 @@ const MSG_ZMODEM_MODE = "z";
 const MSG_ZMODEM_OUTPUT = "y";
 const MSG_ZMODEM_ACK = "Y";
 const MSG_KITTY_DEBUG = "K";
-const KITTY_TRACE = process.env.KITTY_TRACE === "1";
+const KITTY_TRACE = /^(1|true|yes|on)$/i.test(String(process.env.JSGOTTY_KITTY_DEBUG || ""));
 const WINDOWS_BRIDGE_TRACE = process.env.WINDOWS_BRIDGE_TRACE === "1";
 const WINDOWS_BRIDGE_PREFIX = Buffer.from("@@GOTTYCTL:", "ascii");
 const WINDOWS_BRIDGE_SUFFIX = Buffer.from("@@", "ascii");
 const KITTY_PLACEMENT_LOG = path.resolve(__dirname, "kitty-placement.log");
 
 function kittyPlacementLog(stage, details = {}) {
+  if (!KITTY_TRACE) {
+    return;
+  }
   try {
     fs.appendFileSync(KITTY_PLACEMENT_LOG, JSON.stringify({
       time: new Date().toISOString(),
@@ -2424,6 +2427,9 @@ class PtySession {
         this.send(MSG_PONG, "", ws);
         break;
       case MSG_KITTY_DEBUG:
+        if (!KITTY_TRACE) {
+          break;
+        }
         try {
           kittyPlacementLog("browser", JSON.parse(payload));
         } catch (error) {
@@ -3307,9 +3313,11 @@ module.exports.CursorStateTracker = CursorStateTracker;
 module.exports.KittyGraphicsParser = KittyGraphicsParser;
 
 if (require.main === module) {
-  try {
-    fs.writeFileSync(KITTY_PLACEMENT_LOG, "");
-  } catch {}
+  if (KITTY_TRACE) {
+    try {
+      fs.writeFileSync(KITTY_PLACEMENT_LOG, "");
+    } catch {}
+  }
   bootstrap().catch((error) => {
     console.error(String(error && error.stack ? error.stack : error));
     process.exitCode = 1;

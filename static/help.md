@@ -89,7 +89,7 @@ Useful methods/properties:
 
 - `window.getTerminalText`: helper exposed by `GoTTYXterm` for debugging/copying the full visible buffer as plain text.
 - `window.Zmodem`: ZMODEM helper namespace exposed by `zmodem.js`. Useful methods are used by the file-transfer addon, especially `Browser.send_files(...)` and `Browser.save_to_disk(...)`.
-- `window.gotty_kitty_trace`: boolean trace flag consumed by `kitty.js`. When true, kitty-specific debug logging is enabled.
+- `window.gotty_kitty_trace`: boolean trace flag consumed by `kitty.js`. It is enabled by starting jsgotty with `JSGOTTY_KITTY_DEBUG=1`.
 - `window.touchScrollThreshold`: mobile touch-scroll threshold in pixels used by `kitty.js` to convert finger movement into synthetic wheel ticks. Default: 24 px. Lower means faster scrolling.
 - `alert_advanced(text, asHtml, closeOnClick)`: page-local modal helper used by custom UI scripts.
 - `noWinOpenUseFetch()`: intentional monkey patch for link handling.

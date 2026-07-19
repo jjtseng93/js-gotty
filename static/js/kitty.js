@@ -53,6 +53,9 @@
   }
 
   function sendBrowserDebug(stage, details = {}) {
+    if (!KITTY_TRACE) {
+      return;
+    }
     const socket = state.socket;
     if (!socket || socket.readyState !== 1) {
       return;

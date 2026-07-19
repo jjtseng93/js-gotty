@@ -54,6 +54,7 @@
   * 見下方詳細說明兩種模式
 - Kitty Graphics Protocol: 可以顯示終端內嵌圖片
   * 像是用 `bun viu.mjs 1.png` 直接在終端中顯示圖片。
+  * 設定 `JSGOTTY_KITTY_DEBUG=1` 才會寫入 Kitty 圖片除錯 log。
   * Windows 不是使用 Kitty 協定，而是自訂協議
 - ZMODEM / `rz/sz` 上傳/下載功能
   * 可以從瀏覽器端選檔並上傳到遠端 shell
