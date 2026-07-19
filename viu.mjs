@@ -43,6 +43,7 @@ function buildControlFields(imageId, mime, cols, rows, more, compat) {
     "a=T",
     "f=100",
     `i=${imageId}`,
+    `p=${imageId}`,
     "q=2",
     "t=d",
     `c=${cols}`,
@@ -61,7 +62,13 @@ function writePacket(control, payload) {
 
 function writeKittyImage(buffer, mime, width, height, compat) {
   const base64 = buffer.toString("base64");
-  const imageId = Date.now() % 2147483647;
+  let imageId = Date.now() % 2147483647;
+  
+  imageId = process.env.JSGOTTY_IMGID || imageId ;
+  
+  if(process.env.JSGOTTY_DEBUG)
+    console.error(imageId)
+  
   const { cols, rows } = fitImageCells(width, height);
 
   if (process.platform === "win32") {
