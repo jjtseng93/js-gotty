@@ -796,7 +796,6 @@
     if (message.image) {
       message.image.control = control;
     }
-
     let node = state.placements.get(key);
     if (!node) {
       node = document.createElement("div");
@@ -848,7 +847,7 @@
       delete: info,
       placementKeys: Array.from(state.placements.keys()),
     });
-    if (info.scope === "a") {
+    if (info.scope === "a" || info.scope === "A") {
       for (const node of state.placements.values()) {
         removePlacementNode(node);
       }

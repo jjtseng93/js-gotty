@@ -1120,11 +1120,18 @@ class KittyGraphicsParser {
     }
 
     if (action === "d") {
+      const deleteScope = control.d || "a";
+      const deleteImageId = control.i || control.I || null;
+      if (deleteScope === "A") {
+        this.images.clear();
+      } else if (deleteScope === "I" && deleteImageId) {
+        this.images.delete(deleteImageId);
+      }
       return {
         kind: "delete",
         delete: {
-          scope: control.d || "a",
-          imageId: control.i || control.I || null,
+          scope: deleteScope,
+          imageId: deleteImageId,
           placementId: control.p || null,
           cursor
         }
@@ -1196,6 +1203,7 @@ class KittyGraphicsParser {
       format: Number.parseInt(existing.control.f || "32", 10),
       width: Number.parseInt(existing.control.s || "0", 10),
       height: Number.parseInt(existing.control.v || "0", 10),
+      mime: existing.control.U || existing.control.mime || null,
       data: binary.toString("base64")
     };
 

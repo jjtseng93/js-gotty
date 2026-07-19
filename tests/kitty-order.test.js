@@ -35,3 +35,24 @@ test("an APC split across PTY chunks stays ordered after preceding output", () =
   const second = parser.consume(Buffer.from(",i=9;\x1b\\tail"));
   assert.deepEqual(second.events.map((event) => event.kind), ["kitty", "plain"]);
 });
+
+test("placement-only packets reuse the server-side cached image", () => {
+  const parser = new KittyGraphicsParser();
+  const parse = (packet) => {
+    const event = parser.consume(Buffer.from(packet)).events.find((item) => item.kind === "kitty");
+    return event ? parser.parsePacket(event.packet, { row: 1, col: 1 }) : null;
+  };
+
+  const transfer = parse("\x1b_Ga=T,f=100,i=7,p=7,U=image/png,m=0;AA==\x1b\\");
+  assert.equal(transfer.image.data, "AA==");
+  assert.equal(transfer.image.mime, "image/png");
+
+  const placement = parse("\x1b_Ga=p,i=7,p=7,c=5,r=2,C=1;\x1b\\");
+  assert.equal(placement.image.id, "7");
+  assert.equal(placement.image.data, "AA==");
+
+  parse("\x1b_Ga=d,d=i,i=7;\x1b\\");
+  assert.ok(parse("\x1b_Ga=p,i=7,p=7;\x1b\\"));
+  parse("\x1b_Ga=d,d=I,i=7;\x1b\\");
+  assert.equal(parse("\x1b_Ga=p,i=7,p=7;\x1b\\"), null);
+});
