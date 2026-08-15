@@ -763,6 +763,9 @@
       if (state.contextMenu && state.contextMenu.root.contains(event.target)) {
         return;
       }
+      if (event.target instanceof Element && event.target.closest(".xterm-overlay")) {
+        return;
+      }
       const key = placementAtPoint(event.clientX, event.clientY);
       if (!key) {
         return;

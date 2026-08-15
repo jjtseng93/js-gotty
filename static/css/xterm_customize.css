@@ -17,6 +17,8 @@
     user-select: none;
     transition: opacity 180ms ease-in;
     text-align: center;
+    z-index: 10;
+    pointer-events: auto;
 }
 
 .xterm-overlay-button {
@@ -29,4 +31,5 @@
     color: white;
     font: inherit;
     cursor: pointer;
+    pointer-events: auto;
 }
