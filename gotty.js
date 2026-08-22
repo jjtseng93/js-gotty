@@ -3323,3 +3323,8 @@ if (require.main === module) {
     process.exitCode = 1;
   });
 }
+
+//  The guard above is inlined to false once this file is bundled, because
+//  the bundle entry point is single-exe/entry.mjs rather than this file.
+//  Export the starter so that entry point can call it.
+module.exports.bootstrap = bootstrap;
