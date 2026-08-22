@@ -1,5 +1,6 @@
 import { join, posix, sep } from "node:path";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { IS_COMPILED, REPO_ROOT } from "./compiled.js";
 import { pkg } from "./assetsPacker.js";
 
@@ -264,15 +265,28 @@ export function readInternalAssetText(path) {
   return textDecoder.decode(bytes);
 }
 
+//  The fallback reads through node:fs so the same call works under plain
+//  Node, which is the whole point of keeping the loader out of the main
+//  program's module graph.
 export async function readAssetText(path) {
-  return readInternalAssetText(path)
-    ?? await Bun.file(join(REPO_ROOT, path)).text();
+  const internal = readInternalAssetText(path);
+  if (internal != null) return internal;
+
+  //  TextDecoder drops a leading BOM, so the embedded path never returns
+  //  one; readFile keeps it. Strip it here or the same file reads
+  //  differently depending on whether it was embedded.
+  return (await readFile(join(REPO_ROOT, path), "utf8")).replace(/^\uFEFF/, "");
 }
 
 export async function readAssetBytes(path) {
   const internal = readInternalAssetBytes(path);
-  return internal
-    ?? new Uint8Array(await Bun.file(join(REPO_ROOT, path)).arrayBuffer());
+  if (internal) return internal;
+
+  const buf = await readFile(join(REPO_ROOT, path));
+
+  //  Buffer is a Uint8Array, but hand back a plain one so callers cannot
+  //  come to depend on the Buffer-only methods.
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
 export function internalAssetSource(path) {
