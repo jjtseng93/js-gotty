@@ -6,6 +6,11 @@
     "jsgotty": "./gotty.js"
   },
   "type": "commonjs",
+  "assets": [
+    "static",
+    "README.md",
+    "README.en.md"
+  ],
   "dependencies": {
     "node-addon-api": "^7.1.1",
     "ws": "^8.18.3"
