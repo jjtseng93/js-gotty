@@ -1328,10 +1328,26 @@ class NodePtyBackend {
   constructor(options) {
     let nodePty;
     try {
+      //  Split so the bundler cannot resolve it. This branch is unreachable
+      //  in a compiled binary (Bun >= 1.3.14 always takes BunPtyBackend), so
+      //  a static require would only bake ~54 KB of dead JS into the exe —
+      //  and node-pty's own `.node` loading is dynamic anyway, so it would
+      //  still need the files on disk.
       let preventSingleExe="./lib/"
       nodePty = require(preventSingleExe+"node-pty");
     } catch (error) {
-      throw new Error("node-pty is required on Windows but is not installed");
+      const detail = error && error.message ? `: ${error.message}` : "";
+      throw new Error(
+        globalThis.Bun
+          ? "This build falls back to node-pty because Bun " + globalThis.Bun.version
+            + " is older than 1.3.14, which is where the built-in ConPTY backend landed. "
+            + "A compiled binary cannot load node-pty — it is deliberately left out of the "
+            + "bundle — so rebuild with Bun 1.3.14 or newer, or run from a source checkout "
+            + "with node-pty installed" + detail
+          : "node-pty is required to run under Node on Windows, and it could not be loaded "
+            + "from ./lib/node-pty. Run with Bun 1.3.14 or newer to use the built-in ConPTY "
+            + "backend instead" + detail,
+      );
     }
 
     const system32 = path.join(process.env.windir, 'System32');
