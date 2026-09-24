@@ -27,6 +27,34 @@ function usage(exitCode = 0) {
   process.exitCode = exitCode;
 }
 
+//  A browser terminal only reports its size to the PTY once the page has laid
+//  out, so a window that was just opened, restored, resized or rotated answers
+//  with a couple of columns for a few hundred milliseconds. An image sized
+//  against that is emitted as a one-cell speck — indistinguishable from the
+//  command having printed nothing — while the next run in the same session,
+//  by which time the real size has arrived, comes out correct. Give the size a
+//  short chance to settle when what we read back is too small to be a terminal
+//  anyone could be looking at.
+const MIN_SANE_COLS = 20;
+const MIN_SANE_ROWS = 5;
+const SIZE_SETTLE_TIMEOUT_MS = 400;
+const SIZE_POLL_INTERVAL_MS = 25;
+
+function terminalSizeLooksUnset() {
+  return (process.stdout.columns || 0) < MIN_SANE_COLS
+    || (process.stdout.rows || 0) < MIN_SANE_ROWS;
+}
+
+async function waitForStableTerminalSize() {
+  if (!process.stdout.isTTY) {
+    return;
+  }
+  const deadline = Date.now() + SIZE_SETTLE_TIMEOUT_MS;
+  while (terminalSizeLooksUnset() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, SIZE_POLL_INTERVAL_MS));
+  }
+}
+
 function fitImageCells(width, height) {
   const terminalCols = Math.max(1, process.stdout.columns || 80);
   const maxCols = Math.max(1, terminalCols - 1);
@@ -384,6 +412,7 @@ async function main() {
   const fullPath = path.resolve(inputPath);
   const buffer = fs.readFileSync(fullPath);
   const image = sniffImage(buffer, fullPath, { compat });
+  await waitForStableTerminalSize();
   writeKittyImage(buffer, image.mime, image.width, image.height, compat);
 }
 
