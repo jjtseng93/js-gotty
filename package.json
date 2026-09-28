@@ -11,7 +11,10 @@
     "conpty",
     "static",
     "README.md",
-    "README.en.md"
+    "README.en.md",
+    "LICENSE",
+    "NOTICE",
+    "LICENSES"
   ],
   "dependencies": {
     "node-addon-api": "^7.1.1",

@@ -19,3 +19,57 @@ Included third-party component:
 
 The bundled file [static/js/zmodem.js] is byte-for-byte identical to the
 upstream npm release zmodem.js version 0.1.10 dist/zmodem.js.
+
+2. ConPTY - Windows pseudoconsole library and console host
+   (conpty/conpty.dll, conpty/OpenConsole.exe), part of Windows Terminal
+   Copyright (c) Microsoft Corporation. All rights reserved.
+   Licensed under the MIT License
+   Upstream: https://github.com/microsoft/terminal
+   Local copy of license text:
+   LICENSES/MIT-microsoft-terminal-conpty.txt
+   Upstream third-party notices for Windows Terminal:
+   LICENSES/NOTICE-microsoft-terminal-conpty.md
+
+The bundled files in [conpty/] are byte-for-byte identical to the win-x64
+binaries in the official NuGet package
+Microsoft.Windows.Console.ConPTY 1.25.260710002-preview, published with the
+Windows Terminal Preview v1.25.1912.0 release
+(https://github.com/microsoft/terminal/releases/tag/v1.25.1912.0):
+
+   conpty/conpty.dll       (runtimes/win-x64/native/conpty.dll)
+     SHA-256 e2fe87e2258c4e46ffc5157f727218cc25f34a174902f72eb8a5b49edd9a6458
+   conpty/OpenConsole.exe  (build/native/runtimes/x64/OpenConsole.exe)
+     SHA-256 2525c351aa136d555e5df9a3c9d6ce9be43f785e37e3c993b8f23b3f0a53c7fa
+
+The license and notice files are taken verbatim from the microsoft/terminal
+repository at tag v1.25.1912.0. The notice file lists third-party components
+used across Windows Terminal; it is included in full because the subset built
+into these two binaries is not documented separately.
+
+3. node-pty 1.1.0 - forkpty(3) bindings for Node.js (lib/node-pty)
+   Copyright (c) 2012-2015, Christopher Jeffrey
+   Copyright (c) 2016, Daniel Imms
+   Copyright (c) 2018 - present Microsoft Corporation
+   Licensed under the MIT License
+   Upstream: https://github.com/microsoft/node-pty
+   License text: lib/node-pty/LICENSE
+
+   node-pty in turn bundles:
+
+   a. winpty 0.4.4-dev (lib/node-pty/deps/winpty,
+      lib/node-pty/prebuilds/win32-*/winpty.dll and winpty-agent.exe)
+      Copyright (c) 2011-2016 Ryan Prichard
+      Licensed under the MIT License
+      Upstream: https://github.com/rprichard/winpty
+      License text: lib/node-pty/deps/winpty/LICENSE
+
+   b. ConPTY 1.23.251008001 from Windows Terminal
+      (lib/node-pty/prebuilds/win32-*/conpty/conpty.dll and OpenConsole.exe)
+      Copyright (c) Microsoft Corporation. All rights reserved.
+      Licensed under the MIT License; see item 2 for the license and
+      Windows Terminal notice files.
+
+The prebuilt binaries under [lib/node-pty/prebuilds] and the license files
+lib/node-pty/LICENSE and lib/node-pty/deps/winpty/LICENSE are byte-for-byte
+identical to those in the upstream npm release node-pty 1.1.0; they are not
+rebuilt by this project.
