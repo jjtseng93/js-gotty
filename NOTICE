@@ -73,3 +73,49 @@ The prebuilt binaries under [lib/node-pty/prebuilds] and the license files
 lib/node-pty/LICENSE and lib/node-pty/deps/winpty/LICENSE are byte-for-byte
 identical to those in the upstream npm release node-pty 1.1.0; they are not
 rebuilt by this project.
+
+The files in [patches/] (windowsPtyAgent.js, windowsTerminal.js) are modified
+copies of node-pty source files; they keep node-pty's copyright headers and
+remain under its MIT License.
+
+4. npm dependencies committed under [node_modules/]
+
+   a. ws 8.21.0 - WebSocket client and server
+      Copyright (c) 2011 Einar Otto Stangvik
+      Copyright (c) 2013 Arnout Kazemier and contributors
+      Copyright (c) 2016 Luigi Pinca and contributors
+      Licensed under the MIT License
+      License text: node_modules/ws/LICENSE (also LICENSES/MIT-ws.txt,
+      which single executables carry because ws is bundled into them)
+
+   b. node-addon-api 7.1.1 - C++ headers used to build node-pty
+      Copyright (c) 2017 Node.js API collaborators
+      Licensed under the MIT License
+      License text: node_modules/node-addon-api/LICENSE.md
+
+5. Web client assets under [static/]
+
+   static/js/gotty.js is a webpack bundle. The licenses of every package it
+   contains (xterm.js and its fit, web-links, webgl and unicode11 addons,
+   Bootstrap, Popper, Preact, crc-32, zmodem.js, css-loader, style-loader)
+   are listed in static/js/gotty.licenses.txt, with the retained banners in
+   static/js/gotty.js.LICENSE.txt.
+
+   static/js/xterm-addon-unicode11.js is byte-for-byte identical to
+   lib/addon-unicode11.js of the npm release @xterm/addon-unicode11 0.9.0, and
+   static/css/xterm.css comes from xterm.js
+   (Copyright (c) 2014 The xterm.js authors; Copyright (c) 2012-2013
+   Christopher Jeffrey; MIT License, text in static/js/gotty.licenses.txt).
+
+   static/favicon.ico, static/icon.svg and static/icon_192.png are
+   byte-for-byte identical to the icons of GoTTY
+   (https://github.com/sorenisanerd/gotty), covered by the MIT License and
+   the GoTTY copyright notices in LICENSE.
+
+Single executables built with --build-exe / --build-for embed the Bun
+runtime. Bun is MIT-licensed but statically links JavaScriptCore and WebKit
+(LGPL-2) and other libraries under their own licenses; anyone distributing
+such an executable must also follow Bun's license terms, including the LGPL
+relinking provisions described at
+https://github.com/oven-sh/bun/blob/main/LICENSE.md. The executables carry
+LICENSE, NOTICE and LICENSES/ as embedded assets.
