@@ -26809,35 +26809,25 @@
                         case 37:
                           if (e.metaKey) break;
                           a
-                            ? ((o.key = r.C0.ESC + "[1;" + (a + 1) + "D"),
-                              o.key === r.C0.ESC + "[1;3D" &&
-                                (o.key = r.C0.ESC + (i ? "b" : "[1;5D")))
+                            ? (o.key = r.C0.ESC + "[1;" + (a + 1) + "D")
                             : (o.key = t ? r.C0.ESC + "OD" : r.C0.ESC + "[D");
                           break;
                         case 39:
                           if (e.metaKey) break;
                           a
-                            ? ((o.key = r.C0.ESC + "[1;" + (a + 1) + "C"),
-                              o.key === r.C0.ESC + "[1;3C" &&
-                                (o.key = r.C0.ESC + (i ? "f" : "[1;5C")))
+                            ? (o.key = r.C0.ESC + "[1;" + (a + 1) + "C")
                             : (o.key = t ? r.C0.ESC + "OC" : r.C0.ESC + "[C");
                           break;
                         case 38:
                           if (e.metaKey) break;
                           a
-                            ? ((o.key = r.C0.ESC + "[1;" + (a + 1) + "A"),
-                              i ||
-                                o.key !== r.C0.ESC + "[1;3A" ||
-                                (o.key = r.C0.ESC + "[1;5A"))
+                            ? (o.key = r.C0.ESC + "[1;" + (a + 1) + "A")
                             : (o.key = t ? r.C0.ESC + "OA" : r.C0.ESC + "[A");
                           break;
                         case 40:
                           if (e.metaKey) break;
                           a
-                            ? ((o.key = r.C0.ESC + "[1;" + (a + 1) + "B"),
-                              i ||
-                                o.key !== r.C0.ESC + "[1;3B" ||
-                                (o.key = r.C0.ESC + "[1;5B"))
+                            ? (o.key = r.C0.ESC + "[1;" + (a + 1) + "B")
                             : (o.key = t ? r.C0.ESC + "OB" : r.C0.ESC + "[B");
                           break;
                         case 45:
