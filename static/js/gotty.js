@@ -26831,7 +26831,10 @@
                             : (o.key = t ? r.C0.ESC + "OB" : r.C0.ESC + "[B");
                           break;
                         case 45:
-                          e.shiftKey || e.ctrlKey || (o.key = r.C0.ESC + "[2~");
+                          e.shiftKey || e.ctrlKey ||
+                            (o.key = e.altKey
+                              ? r.C0.ESC + "[2;" + (a + 1) + "~"
+                              : r.C0.ESC + "[2~");
                           break;
                         case 46:
                           o.key = a
@@ -26855,14 +26858,14 @@
                         case 33:
                           e.shiftKey
                             ? (o.type = 2)
-                            : e.ctrlKey
+                            : e.ctrlKey || e.altKey
                               ? (o.key = r.C0.ESC + "[5;" + (a + 1) + "~")
                               : (o.key = r.C0.ESC + "[5~");
                           break;
                         case 34:
                           e.shiftKey
                             ? (o.type = 3)
-                            : e.ctrlKey
+                            : e.ctrlKey || e.altKey
                               ? (o.key = r.C0.ESC + "[6;" + (a + 1) + "~")
                               : (o.key = r.C0.ESC + "[6~");
                           break;
@@ -26980,6 +26983,8 @@
                                     ))
                                   : 56 === e.keyCode
                                     ? (o.key = r.C0.DEL)
+                                    : "/" === e.key
+                                      ? (o.key = r.C0.US)
                                     : 219 === e.keyCode
                                       ? (o.key = r.C0.ESC)
                                       : 220 === e.keyCode
