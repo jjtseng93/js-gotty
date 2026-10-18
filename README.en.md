@@ -214,6 +214,10 @@ The `jsgotty` server has two connection modes:
 - `/css` and `/css.md` still list active session PIDs and command names, but they do not provide reconnect tokens or reconnect links.
 - `client.mjs -ls` can list sessions; `-k <pid>` can terminate a session by PID; `-r` and `-d` require session mode.
 
+### Android Physical Keyboards
+
+In the Android terminal, Alt with letters, digits, punctuation, or space sends terminal Alt sequences based on physical key positions (US layout, including Shift), bypassing accent dead-key handling. Alt-E/I/N/U therefore no longer compose characters such as é, ê, ñ, and ü; input methods and paste remain available. When WebView omits `code`, recognized legacy `keyCode` values provide a fallback. Dead keys delivered only as `keyup` send the shortcut on release, without duplicating a previously handled `keydown`. Active composition, Ctrl, Meta, AltGr, and unidentified keys retain their existing handling. This applies only inside the jsgotty terminal and does not modify Android system keyboard settings.
+
 ### Session Mode
 
 - Enable it with `--reconnect` or `--session`.

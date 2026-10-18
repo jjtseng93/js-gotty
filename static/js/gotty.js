@@ -12543,6 +12543,9 @@
 	                toTerminal: (e) => this.term.write(e),
 	                toServer: (e) => this.sendInput(e),
 	              })),
+              this.term.attachCustomKeyEventHandler((event) =>
+                this.handleAndroidAltKey(event),
+              ),
 	              this.setPreferences(t),
 	              (() => {
 	                try {
@@ -12594,11 +12597,71 @@
                     ));
               }),
               this.term.open(e),
+              this.term.textarea?.addEventListener("blur", () => {
+                this.androidAltDownKeys?.clear();
+              }),
               this.term.focus(),
               this.resizeListener(),
               window.addEventListener("resize", () => {
                 this.resizeListener();
               }));
+          }
+          // Android can translate physical Alt shortcuts into accent dead keys.
+          // Resolve printable physical keys before xterm's composition handling.
+          handleAndroidAltKey(event) {
+            if (!/Android/i.test(navigator.userAgent)) return true;
+            let code = event.code;
+            // Some Android IMEs omit code and swallow the dead-key keydown,
+            // but still deliver keyup with a usable legacy keyCode.
+            if (!code) {
+              if (event.keyCode >= 65 && event.keyCode <= 90)
+                code = "Key" + String.fromCharCode(event.keyCode);
+              else if (event.keyCode >= 48 && event.keyCode <= 57)
+                code = "Digit" + String.fromCharCode(event.keyCode);
+              else code = {
+                32: "Space", 186: "Semicolon", 187: "Equal", 188: "Comma",
+                189: "Minus", 190: "Period", 191: "Slash", 192: "Backquote",
+                219: "BracketLeft", 220: "Backslash", 221: "BracketRight", 222: "Quote",
+              }[event.keyCode];
+            }
+            this.androidAltDownKeys ??= new Set();
+            const alreadySent = event.type === "keyup" && this.androidAltDownKeys.delete(code);
+            if (
+              !["keydown", "keypress", "keyup"].includes(event.type) ||
+              !event.altKey || event.ctrlKey || event.metaKey ||
+              event.isComposing || event.getModifierState?.("AltGraph") ||
+              (event.type === "keyup" && event.key !== "Dead")
+            ) return true;
+
+            let character;
+            if (/^Key[A-Z]$/.test(code)) {
+              const letter = code.slice(3);
+              character = event.shiftKey ? letter : letter.toLowerCase();
+            } else if (/^Digit[0-9]$/.test(code)) {
+              const digit = code.slice(5);
+              character = event.shiftKey ? ")!@#$%^&*("[Number(digit)] : digit;
+            } else {
+              const punctuation = {
+                Backquote: ["`", "~"], Minus: ["-", "_"], Equal: ["=", "+"],
+                BracketLeft: ["[", "{"], BracketRight: ["]", "}"],
+                Backslash: ["\\", "|"], Semicolon: [";", ":"], Quote: ["'", '"'],
+                Comma: [",", "<"], Period: [".", ">"], Slash: ["/", "?"],
+                Space: [" ", " "],
+              };
+              character = Object.hasOwn(punctuation, code)
+                ? punctuation[code][event.shiftKey ? 1 : 0]
+                : undefined;
+            }
+            if (character === undefined) return true;
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.type === "keydown") {
+              this.androidAltDownKeys.add(code);
+              this.term.input("\x1b" + character, true);
+            } else if (event.type === "keyup" && !alreadySent) {
+              this.term.input("\x1b" + character, true);
+            }
+            return false;
           }
           info() {
             return { columns: this.term.cols, rows: this.term.rows };

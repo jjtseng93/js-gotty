@@ -214,6 +214,10 @@ bun gotty.js --client -k <token|pid> [target]
 - `/css` 與 `/css.md` 仍會列出目前 active sessions 的 PID 與 command name，但不提供 reconnect token 或接回連結。
 - `client.mjs -ls` 可列出 sessions；`-k <pid>` 可用 PID 終止 session；`-r` 與 `-d` 需要工作階段模式。
 
+### Android 實體鍵盤
+
+Android 終端的 Alt＋字母、數字、標點及空白會依實體按鍵位置（美式配置，支援 Shift）送出終端 Alt 序列，不進入重音死鍵流程。因此 Alt-E/I/N/U 等組合不再用來輸入 é、ê、ñ、ü；仍可使用輸入法或貼上。若 WebView 省略 `code`，會回退使用可辨識的 `keyCode`；若死鍵只送出 `keyup`，則在放開時補送一次，避免與已處理的 `keydown` 重複。正在組字、Ctrl、Meta、AltGr，以及無法辨識按鍵的事件維持原本處理。此規則只作用於 jsgotty 終端，不修改 Android 的系統鍵盤配置。
+
 ### 工作階段(session)模式
 
 - 使用 `--reconnect` 或 `--session` 啟用。
