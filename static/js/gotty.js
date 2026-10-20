@@ -12543,8 +12543,11 @@
 	                toTerminal: (e) => this.term.write(e),
 	                toServer: (e) => this.sendInput(e),
 	              })),
+              (this.kittyKeyboard = new globalThis.GoTTYKittyKeyboard.KittyKeyboard(this.term, {
+                android: /Android/i.test(navigator.userAgent),
+              })),
               this.term.attachCustomKeyEventHandler((event) =>
-                this.handleAndroidAltKey(event),
+                this.kittyKeyboard.handle(event) && this.handleAndroidAltKey(event),
               ),
 	              this.setPreferences(t),
 	              (() => {
@@ -12597,6 +12600,7 @@
                     ));
               }),
               this.term.open(e),
+              this.kittyKeyboard.attach(this.term.textarea),
               this.term.textarea?.addEventListener("blur", () => {
                 this.androidAltDownKeys?.clear();
               }),
@@ -12673,6 +12677,7 @@
             return this.message;
           }
           setDisconnected(e) {
+            if (e) this.kittyKeyboard.reset();
             this.disconnected = !!e;
           }
           setReconnectAction(e) {
@@ -12784,9 +12789,11 @@
             this.term.blur();
           }
           reset() {
+            this.kittyKeyboard.reset();
             (this.removeMessage(), this.term.clear());
           }
           close() {
+            this.kittyKeyboard.dispose();
             (window.removeEventListener("resize", this.resizeListener),
               this.term.dispose());
           }
