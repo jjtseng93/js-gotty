@@ -3,6 +3,11 @@
 [English README](README.en.md)
 
 ## News
+
+### 2026/10/21
+
+- 新增 [Kitty keyboard](#kitty-keyboard) 支援，可區分 Super 等修飾鍵組合，並回報按下、重複與放開事件。
+
 ### 2026/08/16
 - 修正 WebGL 模式下斷線畫面的 `Reconnect` 按鈕無法點擊。
 - `Reconnect` 介面現在會正確位於 WebGL canvas 上方並接收滑鼠與觸控事件；右鍵／長按輸入 reconnect token 或 PID 也不會被 Kitty 圖片事件攔截。

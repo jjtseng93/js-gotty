@@ -3,6 +3,11 @@
 [中文 README](README.md)
 
 ## News
+
+### 2026/10/21
+
+- Added [Kitty keyboard](#kitty-keyboard) support for distinct modifier combinations, including Super, and press/repeat/release events.
+
 ### 2026/08/16
 - Fixed the disconnected-screen `Reconnect` button not being clickable in WebGL mode.
 - The `Reconnect` UI now stays above the WebGL canvas and receives mouse and touch events correctly; Kitty image handling no longer intercepts right-click / long-press for entering a reconnect token or PID.
