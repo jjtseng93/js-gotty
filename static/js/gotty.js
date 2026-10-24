@@ -12705,9 +12705,11 @@
               sequence += modes[state.encoding] ? `\x1b[?${modes[state.encoding]}h` : "\x1b[?1006l";
             }
             if (sequence) this.term.write(sequence);
-            // Assigned rather than replayed so the push stack never doubles.
+            // Assigned rather than replayed so the push stack never doubles; the server
+            // keeps every flag, so mask to the ones kitty-keyboard.js implements.
+            const supported = (s) => ({flags: s.flags & 11, stack: s.stack.map((f) => f & 11)});
             if (state.kitty?.normal && state.kitty?.alternate)
-              this.kittyKeyboard.states = state.kitty;
+              this.kittyKeyboard.states = {normal: supported(state.kitty.normal), alternate: supported(state.kitty.alternate)};
           }
           setDisconnected(e) {
             if (e) this.kittyKeyboard.clearHeld(false);

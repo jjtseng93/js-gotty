@@ -1,7 +1,8 @@
 "use strict";
 
-// Kitty keyboard flags the browser implements (see static/js/kitty-keyboard.js).
-const KITTY_KEYBOARD_SUPPORTED = 1 | 2 | 8;
+// All flags defined by the kitty keyboard protocol. Kept unmasked so a CLI
+// client on a real kitty terminal can restore them; the browser masks its own.
+const KITTY_KEYBOARD_FLAGS = 0x1f;
 const TRACKED_DEC_FLAGS = {
   1: "applicationCursorKeys",
   6: "origin",
@@ -171,14 +172,14 @@ class TerminalModeTracker {
       if (state.stack.length > 32) {
         state.stack.shift();
       }
-      state.flags = value(0) & KITTY_KEYBOARD_SUPPORTED;
+      state.flags = value(0) & KITTY_KEYBOARD_FLAGS;
     } else if (prefix === "<") {
       let count = Math.min(value(0) || 1, 33);
       while (count--) {
         state.flags = state.stack.pop() ?? 0;
       }
     } else if (prefix === "=") {
-      const flags = value(0) & KITTY_KEYBOARD_SUPPORTED;
+      const flags = value(0) & KITTY_KEYBOARD_FLAGS;
       const mode = value(1) || 1;
       if (mode === 1) {
         state.flags = flags;
@@ -191,4 +192,74 @@ class TerminalModeTracker {
   }
 }
 
-module.exports = { TerminalModeTracker };
+const DEFAULT_MODES = new TerminalModeTracker().snapshot();
+const MOUSE_PROTOCOL_MODES = { X10: 9, VT200: 1000, DRAG: 1002, ANY: 1003 };
+const MOUSE_ENCODING_MODES = { SGR: 1006, SGR_PIXELS: 1016 };
+
+// Turns off what a previous client may have left on, using only sequences that
+// are harmless on a clean terminal: no queries, nothing that moves the cursor.
+const STARTUP_RESET =
+  "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1016l\x1b[?1004l\x1b[?2004l" +
+  "\x1b[?1l\x1b>\x1b[?25h\x1b[<100u";
+
+function sameKitty(a, b) {
+  return a.flags === b.flags && a.stack.length === b.stack.length &&
+    a.stack.every((flags, index) => flags === b.stack[index]);
+}
+
+function kittyRebuild(state) {
+  // Popping past the bottom clears the stack and flags; then rebuild bottom-up.
+  let sequence = "\x1b[<100u";
+  if (state.stack.length === 0) {
+    return state.flags ? `${sequence}\x1b[=${state.flags};1u` : sequence;
+  }
+  sequence += `\x1b[=${state.stack[0]};1u`;
+  for (const flags of state.stack.slice(1)) {
+    sequence += `\x1b[>${flags}u`;
+  }
+  return `${sequence}\x1b[>${state.flags}u`;
+}
+
+// Escape sequence that moves a terminal known to be in `from` to `to`, emitting
+// only differences: DECOM homes the cursor and 1049 overwrites the saved cursor.
+function modeTransition(from, to = DEFAULT_MODES) {
+  let sequence = "";
+  const fromScreen = from.alternate ? "alternate" : "normal";
+  const toScreen = to.alternate ? "alternate" : "normal";
+  // Kitty keyboard stacks are per screen, so each is fixed while it is active.
+  if (!sameKitty(from.kitty[fromScreen], to.kitty[fromScreen])) {
+    sequence += kittyRebuild(to.kitty[fromScreen]);
+  }
+  if (fromScreen !== toScreen) {
+    sequence += `\x1b[?1049${to.alternate ? "h" : "l"}`;
+    if (!sameKitty(from.kitty[toScreen], to.kitty[toScreen])) {
+      sequence += kittyRebuild(to.kitty[toScreen]);
+    }
+  }
+  for (const [mode, name] of Object.entries(TRACKED_DEC_FLAGS)) {
+    if (!!from.dec[name] === !!to.dec[name]) {
+      continue;
+    }
+    if (name === "applicationKeypad") {
+      sequence += to.dec[name] ? "\x1b=" : "\x1b>"; // more widely supported than ?66
+    } else {
+      sequence += `\x1b[?${mode}${to.dec[name] ? "h" : "l"}`;
+    }
+  }
+  if (!!from.cursorHidden !== !!to.cursorHidden) {
+    sequence += `\x1b[?25${to.cursorHidden ? "l" : "h"}`;
+  }
+  if (from.mouse !== to.mouse) {
+    sequence += MOUSE_PROTOCOL_MODES[to.mouse]
+      ? `\x1b[?${MOUSE_PROTOCOL_MODES[to.mouse]}h`
+      : `\x1b[?${MOUSE_PROTOCOL_MODES[from.mouse]}l`;
+  }
+  if (from.encoding !== to.encoding) {
+    sequence += MOUSE_ENCODING_MODES[to.encoding]
+      ? `\x1b[?${MOUSE_ENCODING_MODES[to.encoding]}h`
+      : `\x1b[?${MOUSE_ENCODING_MODES[from.encoding]}l`;
+  }
+  return sequence;
+}
+
+module.exports = { TerminalModeTracker, modeTransition, STARTUP_RESET };

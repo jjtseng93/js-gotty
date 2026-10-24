@@ -4,6 +4,9 @@ import process from "node:process";
 import { Buffer } from "node:buffer";
 import WebSocket from "ws";
 import { encodeKittyGraphics, syntheticKittyCursorMotion } from "./client-kitty.mjs";
+import terminalModes from "./terminal-modes.js";
+
+const { TerminalModeTracker, modeTransition, STARTUP_RESET } = terminalModes;
 
 const MSG_INPUT = "1";
 const MSG_PING = "2";
@@ -19,6 +22,7 @@ const MSG_SET_BUFFER_SIZE = "6";
 const MSG_KITTY_GRAPHICS = "7";
 const MSG_SET_ROLE = "a";
 const MSG_CONTROL_RESULT = "b";
+const MSG_RESTORE_MODES = "m";
 
 const DEFAULT_URL = "ws://127.0.0.1:8080/ws";
 
@@ -409,6 +413,26 @@ async function main() {
     return;
   }
   const args = buildArguments(options, initArguments);
+  // The local terminal starts from defaults whether it is new or was left
+  // dirty by a client that was killed, so resuming behaves the same in both.
+  const localModes = new TerminalModeTracker();
+  // A closed terminal surfaces as an async EIO/EPIPE, not a throw. Nobody is
+  // left to read anything, and the PTY keeps its modes, so just exit.
+  for (const stream of [process.stdin, process.stdout, process.stderr]) {
+    stream.on("error", (error) => {
+      if (error.code !== "EIO" && error.code !== "EPIPE") {
+        throw error;
+      }
+      process.exit(process.exitCode ?? 1);
+    });
+  }
+  const writeTerminal = (data) => {
+    process.stdout.write(data);
+    localModes.consume(Buffer.from(data));
+  };
+  if (process.stdout.isTTY) {
+    process.stdout.write(STARTUP_RESET);
+  }
   writeStatus(`[gotty] connecting to\n  ${wsUrl}`);
   const ws = new WebSocket(wsUrl, "webtty");
   let pingTimer = null;
@@ -565,6 +589,11 @@ pid:
     setWritable(false);
     stopFallbackInput();
     stopViewerInput();
+    if (process.stdout.isTTY) {
+      try {
+        writeTerminal(modeTransition(localModes.snapshot()));
+      } catch {}
+    }
     if (rawEnabled) {
       setRawMode(false);
       rawEnabled = false;
@@ -611,7 +640,7 @@ pid:
             break;
           }
           pendingKittyCursorMotion = "";
-          process.stdout.write(output);
+          writeTerminal(output);
           if (fallbackProbe && accessRole === "") {
             fallbackOutputTail = normalizeEcho(
               `${fallbackOutputTail}${output.toString("utf8")}`
@@ -640,6 +669,14 @@ pid:
           pendingKittyCursorMotion = syntheticKittyCursorMotion(message);
           if (encoded) process.stdout.write(encoded);
         } catch {}
+        break;
+      case MSG_RESTORE_MODES:
+        // Only local terminal state; the PTY keeps its modes for the next resume.
+        if (process.stdout.isTTY) {
+          try {
+            writeTerminal(modeTransition(localModes.snapshot(), JSON.parse(payload)));
+          } catch {}
+        }
         break;
       case MSG_SET_RECONNECT: {
         try {

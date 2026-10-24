@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { TerminalModeTracker } = require('../terminal-modes.js');
+const { TerminalModeTracker, modeTransition, STARTUP_RESET } = require('../terminal-modes.js');
 
 const source = fs.readFileSync(path.join(__dirname, '../static/js/gotty.js'), 'utf8');
 const methods = source.slice(source.indexOf('          applySessionModes(state)'), source.indexOf('          setDisconnected(e)'));
@@ -69,13 +69,19 @@ test('fresh client gets the full state restored', () => {
   assert.equal(w.kittyKeyboard.states.alternate.flags, 11);
 });
 
+test('browser masks kitty flags it does not implement', () => {
+  const { w } = client();
+  w.applySessionModes(feed(new TerminalModeTracker(), '\x1b[>31u\x1b[>31u'));
+  assert.equal(JSON.stringify(w.kittyKeyboard.states.normal), JSON.stringify({ flags: 11, stack: [0, 11] }));
+});
+
 test('socket-only reconnect with matching xterm state writes nothing', () => {
   const state = feed(new TerminalModeTracker(), '\x1b[?1049h\x1b[?6h\x1b[?2004h\x1b[?1002h\x1b[?1006h\x1b[>1u\x1b[>11u');
   const { w, writes } = client({ alternate: true, dec: { origin: true, bracketedPasteMode: true }, mouse: 'DRAG', encoding: 'SGR' });
   w.applySessionModes(state);
   assert.equal(writes.length, 0, 'no DECOM cursor homing or 1049 cursor save');
   w.applySessionModes(state);
-  assert.deepEqual(w.kittyKeyboard.states.alternate, { flags: 11, stack: [0, 1] }, 'push stack does not grow');
+  assert.deepEqual(JSON.parse(JSON.stringify(w.kittyKeyboard.states.alternate)), { flags: 11, stack: [0, 1] }, 'push stack does not grow');
 });
 
 test('stale client modes are turned off when the program disabled them while disconnected', () => {
@@ -93,4 +99,31 @@ test('transport disconnect and reconnect clear held keys without resetting negot
   assert.match(reset, /clearHeld\(false\)/);
   assert.doesNotMatch(reset, /kittyKeyboard.reset/);
   assert.match(source, /setDisconnected\(e\) \{\s*if \(e\) this.kittyKeyboard.clearHeld\(false\)/);
+});
+
+const sessions = {
+  vim: '\x1b[?1049h\x1b[?1h\x1b=\x1b[?2004h\x1b[?1002h\x1b[?1006h\x1b[?25l',
+  kittyBothScreens: '\x1b[>1u\x1b[?1049h\x1b[>31u\x1b[>3u\x1b[?1003h\x1b[?1016h',
+  kittySetThenPush: '\x1b[=5;1u\x1b[>8u\x1b[?1004h\x1b[?6h',
+};
+
+for (const [name, output] of Object.entries(sessions)) {
+  test(`CLI resume and cleanup round-trip: ${name}`, () => {
+    const target = feed(new TerminalModeTracker(), output);
+    const local = new TerminalModeTracker();
+    assert.deepEqual(feed(local, modeTransition(local.snapshot(), target)), target, 'fresh terminal reaches PTY state');
+    assert.equal(modeTransition(local.snapshot(), target), '', 'nothing left to send once in sync');
+    assert.deepEqual(feed(local, modeTransition(local.snapshot())), new TerminalModeTracker().snapshot(), 'cleanup returns to defaults');
+  });
+}
+
+test('kitty flags are kept unmasked for terminals that support all of them', () => {
+  assert.equal(feed(new TerminalModeTracker(), '\x1b[>31u').kitty.normal.flags, 31);
+});
+
+test('startup reset clears what a killed client could leave behind without moving the cursor', () => {
+  const dirty = new TerminalModeTracker();
+  feed(dirty, '\x1b[?1h\x1b=\x1b[?2004h\x1b[?1003h\x1b[?1006h\x1b[?1004h\x1b[?25l\x1b[>1u\x1b[>11u');
+  assert.deepEqual(feed(dirty, STARTUP_RESET), new TerminalModeTracker().snapshot());
+  assert.doesNotMatch(STARTUP_RESET, /\?(6|1049)[hl]|\x1b\[\?u/);
 });
