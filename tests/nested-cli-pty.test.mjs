@@ -16,7 +16,7 @@ function simulatedServer(initial){
   websocket:{
    message(ws,message){const text=String(message);
     if(text[0]==='{'){
-     socket=ws;ws.send('m'+JSON.stringify(state.snapshot()));
+     socket=ws;ws.send('m'+JSON.stringify({...state.snapshot(),kittyRestore:1}));
      ws.send('a'+JSON.stringify({role:'writer',writable:true}));
     }else if(text[0]==='1')input(Buffer.from(text.slice(1),'base64'));
     else if(text[0]==='2')ws.send('2');
@@ -40,7 +40,7 @@ function terminalEndpoint(parent){
  return {state,data(terminal,data){
   state.consume(data);pending+=data.toString('latin1');
   const re=/\x1b\]777;jsgotty-modes;([a-f0-9]{32})\x07/g;let m;
-  while((m=re.exec(pending)))terminal.write(`\x1b]777;jsgotty-modes;${m[1]};${Buffer.from(JSON.stringify(state.snapshot())).toString('base64')}\x07`);
+  while((m=re.exec(pending)))terminal.write(`\x1b]777;jsgotty-modes;${m[1]};${Buffer.from(JSON.stringify({...state.snapshot(),kittyRestore:1})).toString('base64')}\x07`);
   const start=pending.lastIndexOf('\x1b]');pending=start>=0&&!pending.slice(start).includes('\x07')?pending.slice(start):'';
  }};
 }

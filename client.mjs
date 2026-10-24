@@ -616,7 +616,7 @@ pid:
     stopViewerInput();
     if (process.stdout.isTTY) {
       try {
-        writeTerminal(modeTransition(localModes.snapshot(), originalModes, { normalizeMouse: true }));
+        writeTerminal(modeTransition(localModes.snapshot(), originalModes, { normalizeMouse: true, kittyRestore: captured.probe.kittyRestore }));
       } catch {}
     }
     if (rawEnabled) {
@@ -699,7 +699,7 @@ pid:
         // Only local terminal state; the PTY keeps its modes for the next resume.
         if (process.stdout.isTTY) {
           try {
-            writeTerminal(modeTransition(localModes.snapshot(), validateSnapshot(JSON.parse(payload)), { normalizeMouse: true }));
+            writeTerminal(modeTransition(localModes.snapshot(), validateSnapshot(JSON.parse(payload)), { normalizeMouse: true, kittyRestore: captured.probe.kittyRestore }));
           } catch {}
         }
         break;

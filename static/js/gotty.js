@@ -12552,9 +12552,16 @@
               })),
               this.term.parser.registerOscHandler(777, data => {
                 const match = /^jsgotty-modes;([a-f0-9]{32})$/.exec(data);
-                if (!match) return false;
+                if (!match) {
+                  const restore = /^jsgotty-kitty-v1;(normal|alternate);(\d{1,2});(\d{1,2}(?:,\d{1,2})*)?$/.exec(data);
+                  if (!restore) return false;
+                  const flags = +restore[2], stack = restore[3] ? restore[3].split(',').map(Number) : [];
+                  if (flags > 31 || stack.length > 32 || stack.some(n => n > 31)) return true;
+                  this.kittyKeyboard.states[restore[1]] = {flags: flags & 11, stack: stack.map(n => n & 11)};
+                  return true;
+                }
                 this.term.input("\x1b]777;jsgotty-modes;" + match[1] + ";" +
-                  btoa(JSON.stringify(this.sessionModes())) + "\x07", false);
+                  btoa(JSON.stringify({...this.sessionModes(), kittyRestore: 1})) + "\x07", false);
                 return true;
               }),
               this.term.attachCustomKeyEventHandler((event) =>

@@ -71,6 +71,7 @@ class TerminalModeTracker {
             this._seq = "";
           } else if (byte === 0x5d || byte === 0x50 || byte === 0x5f || byte === 0x5e || byte === 0x58) {
             this._state = "string";
+            this._osc = byte === 0x5d ? "" : null;
           } else if (byte === 0x1b) {
             this._state = "esc";
           } else if (byte >= 0x20 && byte <= 0x2f) {
@@ -99,16 +100,29 @@ class TerminalModeTracker {
           break;
         case "string":
           if (byte === 0x07 || byte === 0x18 || byte === 0x1a) {
+            if (byte === 0x07) this.handleOsc();
             this._state = "text";
           } else if (byte === 0x1b) {
             this._state = "string-esc";
+          } else if (this._osc != null) {
+            this._osc = this._osc.length < 256 ? this._osc + String.fromCharCode(byte) : null;
           }
           break;
         case "string-esc":
+          if (byte === 0x5c) this.handleOsc();
+          else this._osc = null;
           this._state = byte === 0x1b ? "string-esc" : byte === 0x5c ? "text" : "string";
           break;
       }
     }
+  }
+
+  handleOsc() {
+    const match = /^777;jsgotty-kitty-v1;(normal|alternate);(\d{1,2});(\d{1,2}(?:,\d{1,2})*)?$/.exec(this._osc || '');
+    if (!match) return;
+    const flags = +match[2], stack = match[3] ? match[3].split(',').map(Number) : [];
+    if (flags > 31 || stack.length > 32 || stack.some(n=>n > 31)) return;
+    this.kitty[match[1]] = {flags, stack};
   }
 
   handleEsc(byte) {
@@ -224,7 +238,7 @@ function kittyTransition(from, to) {
 
 // Escape sequence that moves a terminal known to be in `from` to `to`, emitting
 // only differences: DECOM homes the cursor and 1049 overwrites the saved cursor.
-function modeTransition(from, to = DEFAULT_MODES, { normalizeMouse = false } = {}) {
+function modeTransition(from, to = DEFAULT_MODES, { normalizeMouse = false, kittyRestore = false } = {}) {
   let sequence = "";
   const fromScreen = from.alternate ? "alternate" : "normal";
   const toScreen = to.alternate ? "alternate" : "normal";
@@ -239,11 +253,12 @@ function modeTransition(from, to = DEFAULT_MODES, { normalizeMouse = false } = {
     }
   }
   const inactive = toScreen === "normal" ? "alternate" : "normal";
-  if (from.alternate != null && to.alternate != null && fromScreen === toScreen &&
-      !sameKitty(from.kitty[inactive], to.kitty[inactive]) && to.kitty[inactive].flags != null) {
-    sequence += `\x1b[?1047${inactive === "alternate" ? "h" : "l"}`;
-    sequence += kittyTransition(from.kitty[inactive], to.kitty[inactive]);
-    sequence += `\x1b[?1047${to.alternate ? "h" : "l"}`;
+  // Switching screens just to edit a hidden stack destroys alternate contents.
+  // Only emit this extension after the actual terminal advertised support.
+  const hidden = to.kitty[inactive];
+  if (kittyRestore && from.alternate != null && to.alternate != null && fromScreen === toScreen &&
+      !sameKitty(from.kitty[inactive], hidden) && hidden.flags != null && hidden.stack.every(Number.isInteger)) {
+    sequence += `\x1b]777;jsgotty-kitty-v1;${inactive};${hidden.flags};${hidden.stack.join(',')}\x07`;
   }
   for (const [mode, name] of Object.entries(TRACKED_DEC_FLAGS)) {
     if (to.dec[name] == null || from.dec[name] === to.dec[name]) {

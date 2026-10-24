@@ -95,3 +95,11 @@ test('normalization clears every conflicting switch, even if aggregate appears u
   assert.deepEqual(bits,{9:false,1000:target.mouse==='VT200',1002:false,1003:false,1006:target.encoding==='SGR',1016:false});
  }
 });
+
+test('hidden Kitty restore requires an explicit capability in a valid private reply',()=>{
+ for(const advertised of [undefined,0,true,1]){
+  const p=new ModeProbe(),reply={...new TerminalModeTracker().snapshot(),kittyRestore:advertised};
+  p.consume(p.privatePrefix+Buffer.from(JSON.stringify(reply)).toString('base64')+'\x07');
+  assert.equal(p.complete,true);assert.equal(p.kittyRestore,advertised===1);
+ }
+});

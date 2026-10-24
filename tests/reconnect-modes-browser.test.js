@@ -31,12 +31,36 @@ test('browser -> CLI -> CLI: independent disconnects preserve terminal modes', {
   const result=await call('Runtime.evaluate',{awaitPromise:true,returnByValue:true,expression:`(async()=>{
 
    const term=wrapper.term;
-   const {TerminalModeTracker,modeTransition,validateSnapshot}=modes;
+   const {TerminalModeTracker,validateSnapshot}=modes;
+   const modeTransition=(from,to)=>modes.modeTransition(from,to,{kittyRestore:true});
    const tracker=()=>new TerminalModeTracker();
    const equal=(a,b,label)=>{if(JSON.stringify(a)!==JSON.stringify(b))throw Error(label+JSON.stringify({actual:a,expected:b}));};
    const snapshot=()=>validateSnapshot(wrapper.sessionModes());
    const drain=()=>new Promise(r=>wrapper.enqueueTerminal(done=>{done();r();}));
    const write=s=>new Promise(r=>term.write(s,r));
+
+   // Mode-only restoration must preserve visible cells and cursor on either
+   // screen, even if the other screen's Kitty stack differs.
+   for(const alternate of [false,true]){
+    await write('\\x1bcNORMAL CONTENT');
+    if(alternate)await write('\\x1b[?1049hVISIBLE FULLSCREEN CONTENT');
+    await write('\\x1b[4;9H');
+    const view=()=>({type:term.buffer.active.type,x:term.buffer.active.cursorX,y:term.buffer.active.cursorY,
+      lines:Array.from({length:term.rows},(_,i)=>term.buffer.active.getLine(i)?.translateToString(true))});
+    const before=view(),from=snapshot(),to=structuredClone(from);
+    const inactive=alternate?'normal':'alternate';
+    to.kitty[inactive]={flags:9,stack:[0,1]};
+    // No negotiated support: do not switch screens to repair a hidden stack.
+    const fallback=modes.modeTransition(from,to);
+    equal(fallback,'','unnegotiated hidden restore');
+    await write(fallback);equal(view(),before,'fallback preserves cells/cursor');
+    const sequence=modeTransition(from,to);
+    if(sequence.includes('[?1047')||sequence.includes('[?1049'))throw Error('hidden restore switched screens');
+    await write(sequence);
+    equal(view(),before,'negotiated restore preserves cells/cursor');
+    equal(snapshot(),to,'hidden stack restored without switching');
+   }
+   await write('\\x1bc');
    // Regression: raw xterm writes already queued before a restore, followed by
    // newer output. Restoration must happen between these two generations.
    term.write('\\x1b[?1002h\\x1b[>11u');
@@ -108,6 +132,7 @@ test('browser -> CLI -> CLI: independent disconnects preserve terminal modes', {
    await write('\\x1b]777;jsgotty-modes;0123456789abcdef0123456789abcdef\\x07');
    equal(sent.length,1,'private query reply count');
    const encoded=sent[0].split(';')[3].slice(0,-1);
+   equal(JSON.parse(atob(encoded)).kittyRestore,1,'restore capability advertised');
    equal(validateSnapshot(JSON.parse(atob(encoded))),snapshot(),'private query state');
    wrapper.close();return 'ok';
   })()`});

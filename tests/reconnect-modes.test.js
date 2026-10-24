@@ -139,3 +139,28 @@ test('unknown original modes are not replaced with guessed defaults on cleanup',
   unknown.kitty.normal.flags = unknown.kitty.alternate.flags = null;
   assert.equal(modeTransition(feed(new TerminalModeTracker(), '\x1b[?1049h\x1b[>11u'), unknown), '');
 });
+
+test('hidden Kitty restoration is negotiated and never toggles the screen',()=>{
+ for(const alternate of [false,true]){
+  const local=new TerminalModeTracker();if(alternate)feed(local,'\x1b[?1049h');
+  const target=local.snapshot(),hidden=alternate?'normal':'alternate';
+  target.kitty[hidden]={flags:9,stack:[0,1]};
+  assert.equal(modeTransition(local.snapshot(),target),'');
+  const sequence=modeTransition(local.snapshot(),target,{kittyRestore:true});
+  assert.doesNotMatch(sequence,/\[\?(?:47|1047|1049)[hl]/);
+  // Every-byte fragmentation must be handled by intermediate server trackers.
+  for(const byte of Buffer.from(sequence))local.consume(Buffer.from([byte]));
+  assert.deepEqual(local.snapshot(),target);
+ }
+});
+test('Kitty restore tracker rejects malformed or unrelated string commands',()=>{
+ const t=new TerminalModeTracker(),before=t.snapshot();
+ for(const payload of [
+  '\x1b]777;jsgotty-kitty-v1;normal;32;0\x07',
+  '\x1b]777;jsgotty-kitty-v1;normal;1;'+Array(33).fill('0').join(',')+'\x07',
+  '\x1bP777;jsgotty-kitty-v1;normal;1;0\x1b\\',
+  '\x1b]777;jsgotty-kitty-v1;normal;1;0\x18',
+ ]){feed(t,payload);assert.deepEqual(t.snapshot(),before);}
+ feed(t,'\x1b]777;jsgotty-kitty-v1;normal;1;0\x1b\\');
+ assert.deepEqual(t.kitty.normal,{flags:1,stack:[0]});
+});

@@ -8,6 +8,7 @@ export class ModeProbe {
     this.nonce = nonce;
     this.pending = Buffer.alloc(0);
     this.complete = false;
+    this.kittyRestore = false;
     this.state = new TerminalModeTracker().snapshot();
     for (const key of Object.keys(this.state.dec)) this.state.dec[key] = null;
     for (const key of ['alternate','cursorHidden','mouse','encoding']) this.state[key] = null;
@@ -64,7 +65,9 @@ export class ModeProbe {
         if (end < 0 && text.length < 16384) break;
         if (end >= 0) {
           try {
-            this.state = validateSnapshot(JSON.parse(Buffer.from(text.slice(this.privatePrefix.length,end),'base64').toString()));
+            const reply = JSON.parse(Buffer.from(text.slice(this.privatePrefix.length,end),'base64').toString());
+            this.state = validateSnapshot(reply);
+            this.kittyRestore = reply.kittyRestore === 1;
             this.complete = true;
           } catch {}
           this.pending = this.pending.subarray(end+1); continue;
