@@ -26,3 +26,20 @@ test('concurrent exit requests queue only one flush and retain first exit code',
  assert.equal(f.callbacks.length,1);assert.deepEqual(f.calls,['cleanup','report','close']);
  f.callbacks[0]();assert.equal(f.calls.at(-1),130);
 });
+for (const [key, code] of [[99,130],[100,0],[113,0]]) {
+ for (const sequence of ['\x1b['+key+';5u', '\x1b['+key+';5:1u', '\x1b['+key+';197u', '\x1b[27;5;'+key+'~']) {
+  test('viewer encoded Ctrl key '+JSON.stringify(sequence)+' split',()=>{
+   const f=fixture();
+   for(const byte of Buffer.from(sequence)) f.handleViewerInput(Buffer.from([byte]));
+   assert.equal(f.callbacks.length,1);f.callbacks[0]();assert.equal(f.calls.at(-1),code);
+  });
+ }
+}
+test('viewer ignores release and other modifiers before exit press',()=>{
+ const f=fixture();
+ for(const sequence of ['\x1b[99;5:3u','\x1b[100;1u','\x1b[113;7u','\x1b[<0;99;100M'])
+  f.handleViewerInput(Buffer.from(sequence));
+ assert.equal(f.callbacks.length,0);
+ f.handleViewerInput(Buffer.from('\x1b[113;5:2u'));
+ assert.equal(f.callbacks.length,1);
+});

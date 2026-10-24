@@ -491,14 +491,42 @@ async function main() {
     process.stdout.write("", () => process.exit(code));
   };
 
+  // Restoring the viewed session also restores Kitty keyboard modes. Exit
+  // keys can therefore arrive as CSI u rather than legacy control bytes.
+  // Keep CSI packets across chunks; never treat a key-release as a press.
+  let viewerSequence = "";
   const handleViewerInput = (chunk) => {
     for (const byte of terminalInput(chunk)) {
-      if (byte === 0x03) {
-        return exitClient(130);
+      if (viewerSequence) {
+        viewerSequence += String.fromCharCode(byte);
+        if (viewerSequence === "\x1b[") continue;
+        if (viewerSequence.length === 2 && byte !== 0x5b) {
+          viewerSequence = "";
+          continue;
+        }
+        if (viewerSequence.length > 2 && byte >= 0x40 && byte <= 0x7e) {
+          const sequence = viewerSequence;
+          viewerSequence = "";
+          const kitty = /^\x1b\[(\d+)(?::[0-9:]*)?(?:;(\d+)(?::([123]))?)?(?:;[0-9:]+)?u$/.exec(sequence);
+          const modified = /^\x1b\[27;(\d+);(\d+)~$/.exec(sequence);
+          const key = kitty ? +kitty[1] : modified ? +modified[2] : 0;
+          const modifiers = (kitty ? +(kitty[2] || 1) : modified ? +modified[1] : 1) - 1;
+          // Ignore Caps/Num Lock, but require Ctrl without Alt/Shift/Super.
+          if ((modifiers & ~192) === 4 && (!kitty || kitty[3] !== "3")) {
+            if (key === 99) return exitClient(130);
+            if (key === 100 || key === 113) return exitClient(0);
+          }
+        } else if (viewerSequence.length > 128) {
+          viewerSequence = "";
+        }
+        continue;
       }
-      if (byte === 0x04 || byte === 0x11) {
-        return exitClient(0);
+      if (byte === 0x1b) {
+        viewerSequence = "\x1b";
+        continue;
       }
+      if (byte === 0x03) return exitClient(130);
+      if (byte === 0x04 || byte === 0x11) return exitClient(0);
     }
   };
 

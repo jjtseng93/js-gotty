@@ -9,7 +9,7 @@ const {TerminalModeTracker}=modes;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function until(check,label){for(let i=0;i<300;i++){if(check())return;await sleep(10);}throw Error('Timed out: '+label);}
 function tracker(sequence=''){const t=new TerminalModeTracker();t.consume(Buffer.from(sequence));return t;}
-function simulatedServer(initial){
+function simulatedServer(initial, viewer=false){
  const state=tracker(initial);let socket=null,input=()=>{};
  const server=Bun.serve({hostname:'127.0.0.1',port:0,
   fetch(req,server){if(server.upgrade(req))return;return new Response('fixture');},
@@ -17,7 +17,7 @@ function simulatedServer(initial){
    message(ws,message){const text=String(message);
     if(text[0]==='{'){
      socket=ws;ws.send('m'+JSON.stringify({...state.snapshot(),kittyRestore:1}));
-     ws.send('a'+JSON.stringify({role:'writer',writable:true}));
+     ws.send('a'+JSON.stringify({role:viewer?'viewer':'writer',writable:!viewer}));
     }else if(text[0]==='1')input(Buffer.from(text.slice(1),'base64'));
     else if(text[0]==='2')ws.send('2');
    },close(ws){if(socket===ws)socket=null;}
@@ -94,5 +94,23 @@ test('real nested CLI PTYs: detach each client, preserve parents, direct fresh a
  }finally{
   for(const p of children){try{p.kill();p.terminal.close();}catch{}}
   b.server.stop(true);c.server.stop(true);
+ }
+});
+test('real viewer PTYs exit with legacy and Kitty Ctrl-C/D/Q and restore parent', {skip:typeof Bun==='undefined',timeout:30000},async()=>{
+ for(const [key,code] of [[3,130],[4,0],[17,0],[99,130],[100,0],[113,0]]){
+  const server=simulatedServer('\x1b[>11u',true);
+  const outer=terminalEndpoint(tracker().snapshot());
+  const proc=spawnClient(server.url,outer.data);
+  try{
+   await until(()=>outer.output.includes('Exit by Ctrl+C/D/Q'),'viewer ready');
+   const sequence=key<32?String.fromCharCode(key):'\x1b['+key+';5u';
+   for(const byte of Buffer.from(sequence)) proc.terminal.write(Buffer.from([byte]));
+   await until(()=>proc.exitCode!==null,'viewer exited');
+   assert.equal(await proc.exited,code);
+   assert.deepEqual(outer.state.snapshot(),tracker().snapshot());
+  }finally{
+   if(proc.exitCode===null){proc.kill();await proc.exited;}
+   proc.terminal.close();server.server.stop(true);
+  }
  }
 });
