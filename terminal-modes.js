@@ -224,7 +224,7 @@ function kittyTransition(from, to) {
 
 // Escape sequence that moves a terminal known to be in `from` to `to`, emitting
 // only differences: DECOM homes the cursor and 1049 overwrites the saved cursor.
-function modeTransition(from, to = DEFAULT_MODES) {
+function modeTransition(from, to = DEFAULT_MODES, { normalizeMouse = false } = {}) {
   let sequence = "";
   const fromScreen = from.alternate ? "alternate" : "normal";
   const toScreen = to.alternate ? "alternate" : "normal";
@@ -258,15 +258,23 @@ function modeTransition(from, to = DEFAULT_MODES) {
   if (to.cursorHidden != null && from.cursorHidden !== to.cursorHidden) {
     sequence += `\x1b[?25${to.cursorHidden ? "l" : "h"}`;
   }
-  if (to.mouse != null && from.mouse !== to.mouse) {
-    sequence += MOUSE_PROTOCOL_MODES[to.mouse]
-      ? `\x1b[?${MOUSE_PROTOCOL_MODES[to.mouse]}h`
-      : `\x1b[?${MOUSE_PROTOCOL_MODES[from.mouse] || 1000}l`;
-  }
-  if (to.encoding != null && from.encoding !== to.encoding) {
-    sequence += MOUSE_ENCODING_MODES[to.encoding]
-      ? `\x1b[?${MOUSE_ENCODING_MODES[to.encoding]}h`
-      : `\x1b[?${MOUSE_ENCODING_MODES[from.encoding] || 1006}l`;
+  // Raw query results preserve independent switches on native terminals. Reset
+  // first, then enable in priority order so exclusive terminals also end in the
+  // intended effective mode. Unanswered switches are never guessed.
+  for (const [name, bitsName, table] of [
+    ['mouse', 'mouseModeBits', MOUSE_PROTOCOL_MODES],
+    ['encoding', 'mouseEncodingBits', MOUSE_ENCODING_MODES],
+  ]) {
+    const bits = to[bitsName];
+    if (bits) {
+      for (const mode of Object.values(table))
+        if (bits[mode] === false) sequence += `\x1b[?${mode}l`;
+      for (const mode of Object.values(table))
+        if (bits[mode] === true) sequence += `\x1b[?${mode}h`;
+    } else if (to[name] != null && (normalizeMouse || from[name] !== to[name])) {
+      for (const mode of Object.values(table)) sequence += `\x1b[?${mode}l`;
+      if (table[to[name]]) sequence += `\x1b[?${table[to[name]]}h`;
+    }
   }
   return sequence;
 }
@@ -285,6 +293,16 @@ function validateSnapshot(value) {
   for (const [key, choices] of [['mouse', ['NONE', ...Object.values(MOUSE_PROTOCOLS)]], ['encoding', ['DEFAULT', ...Object.values(MOUSE_ENCODINGS)]]]) {
     if (value[key] !== null && !choices.includes(value[key])) throw Error("Invalid mouse mode");
     result[key] = value[key];
+  }
+  for (const [key, table] of [['mouseModeBits', MOUSE_PROTOCOLS], ['mouseEncodingBits', MOUSE_ENCODINGS]]) {
+    if (value[key] === undefined) continue;
+    if (!value[key] || typeof value[key] !== 'object') throw Error('Invalid mouse bits');
+    result[key] = {};
+    for (const mode of Object.keys(table)) {
+      const bit = value[key][mode];
+      if (bit !== null && typeof bit !== 'boolean') throw Error('Invalid mouse bit');
+      result[key][mode] = bit;
+    }
   }
   for (const key of ['normal', 'alternate']) {
     const state = value.kitty[key];

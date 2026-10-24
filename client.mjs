@@ -481,7 +481,10 @@ async function main() {
     }
   };
 
+  let exiting = false;
   const exitClient = (code = 0) => {
+    if (exiting) return;
+    exiting = true;
     cleanup();
     reportDisconnected();
     ws.close();
@@ -491,10 +494,10 @@ async function main() {
   const handleViewerInput = (chunk) => {
     for (const byte of terminalInput(chunk)) {
       if (byte === 0x03) {
-        exitClient(130);
+        return exitClient(130);
       }
       if (byte === 0x04 || byte === 0x11) {
-        exitClient(0);
+        return exitClient(0);
       }
     }
   };
@@ -613,7 +616,7 @@ pid:
     stopViewerInput();
     if (process.stdout.isTTY) {
       try {
-        writeTerminal(modeTransition(localModes.snapshot(), originalModes));
+        writeTerminal(modeTransition(localModes.snapshot(), originalModes, { normalizeMouse: true }));
       } catch {}
     }
     if (rawEnabled) {
@@ -696,7 +699,7 @@ pid:
         // Only local terminal state; the PTY keeps its modes for the next resume.
         if (process.stdout.isTTY) {
           try {
-            writeTerminal(modeTransition(localModes.snapshot(), validateSnapshot(JSON.parse(payload))));
+            writeTerminal(modeTransition(localModes.snapshot(), validateSnapshot(JSON.parse(payload)), { normalizeMouse: true }));
           } catch {}
         }
         break;

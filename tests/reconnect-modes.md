@@ -3,7 +3,7 @@
 No extra dependencies are needed. Use an already installed Chromium:
 
 ```sh
-node --test tests/client-modes.test.mjs tests/reconnect-modes.test.js
+node --test tests/client-modes.test.mjs tests/client-exit.test.mjs tests/reconnect-modes.test.js
 bun test tests/nested-cli-pty.test.mjs
 CHROMIUM_HEADLESS=/usr/local/bin/chromium-headless-shell node --test tests/reconnect-modes-browser.test.js tests/kitty-keyboard-browser.test.js
 ```
@@ -28,3 +28,9 @@ OSC 777 is already used for rxvt-style extensions; the jsgotty subcommand avoids
 After 200 ms without the private reply, the CLI requests standard DECRQM and Kitty flags, with a total startup timeout of 1 second. Unsupported/unanswered fields remain unknown rather than becoming guessed defaults. Standard Kitty queries report current flags, not the hidden stack. Full stack restoration is therefore available between updated jsgotty clients/browser; native terminals cannot promise restoration of pre-existing hidden entries if the remote application itself pops them. The CLI never clears an arbitrary 100 entries.
 
 Startup standard replies are consumed at most once per requested mode, with a bounded late-reply window. Standard replies have no nonce: a reply to an application's identical query during that short outstanding window cannot be distinguished perfectly from a delayed startup reply.
+
+## Native mouse switches and exit ordering
+
+Standard probing also retains optional `mouseModeBits` and `mouseEncodingBits`, with boolean values for answered switches and null for silence. For multiple active replies, the effective priority is explicitly ANY > DRAG > VT200 > X10 and SGR_PIXELS > SGR. This is a compatibility policy for the represented modes, not a claim that larger DEC numbers universally win. Cleanup restores the recorded switches (known disabled first, enabled in increasing priority); partial replies do not invent values for unanswered switches. CLI attachment to a known session normalizes the whole represented group before enabling its effective mode, even when the local aggregate name matches, because native terminals may retain independent hidden switches. Server tracking continues to follow xterm's exclusive-mode semantics.
+
+The tests exercise both independent-switch and exclusive-mode terminal models, downgrade from stronger modes, unchanged aggregates with conflicting underlying switches, and partial replies. `client-exit.test.mjs` executes the production exit handlers with delayed stdout callbacks: the first exit request wins, subsequent bytes/signals do not schedule a second exit, and exit still waits for stdout to flush.

@@ -61,3 +61,37 @@ test('unsupported replies do not override active modes or fill unanswered fields
  p.consume('\x1b[?1000;0$y\x1b[?1003;0$y');
  assert.equal(p.state.mouse,'DRAG');
 });
+
+test('multiple active replies preserve individual switches and select explicit priorities',()=>{
+ const p=new ModeProbe();p.standardQuery();
+ for(const n of [1003,1002,1000,1016,1006])p.consume(`\x1b[?${n};1$y`);
+ p.consume('\x1b[?9;2$y');
+ assert.equal(p.state.mouse,'ANY');assert.equal(p.state.encoding,'SGR_PIXELS');
+ assert.deepEqual(p.state.mouseModeBits,{9:false,1000:true,1002:true,1003:true});
+ assert.deepEqual(p.state.mouseEncodingBits,{1006:true,1016:true});
+ assert.deepEqual(modes.validateSnapshot(p.state),p.state);
+ const bits={9:true,1000:false,1002:false,1003:false,1006:false,1016:false};
+ const cleanup=modes.modeTransition(new TerminalModeTracker().snapshot(),p.state);
+ for(const [,n,on] of cleanup.matchAll(/\x1b\[\?(\d+)([hl])/g))bits[n]=on==='h';
+ assert.deepEqual(bits,{...p.state.mouseModeBits,...p.state.mouseEncodingBits});
+ // The same sequence on an exclusive xterm-style terminal ends at the
+ // effective mode, without trying to change its parser semantics.
+ const exclusive=new TerminalModeTracker();exclusive.consume(Buffer.from(cleanup));
+ assert.equal(exclusive.mouse,'ANY');assert.equal(exclusive.encoding,'SGR_PIXELS');
+});
+
+test('partial query restoration leaves unreported switches untouched',()=>{
+ const p=new ModeProbe();p.standardQuery();p.consume('\x1b[?1000;2$y\x1b[?1006;1$y');
+ const cleanup=modes.modeTransition(new TerminalModeTracker().snapshot(),p.state,{normalizeMouse:true});
+ assert.equal(cleanup,'\x1b[?1000l\x1b[?1006h');
+});
+
+test('normalization clears every conflicting switch, even if aggregate appears unchanged',()=>{
+ for(const target of [{mouse:'NONE',encoding:'DEFAULT'},{mouse:'VT200',encoding:'SGR'}]){
+  const state={...new TerminalModeTracker().snapshot(),...target};
+  const bits={9:true,1000:true,1002:true,1003:true,1006:true,1016:true};
+  const seq=modes.modeTransition(state,state,{normalizeMouse:true});
+  for(const [,n,on] of seq.matchAll(/\x1b\[\?(\d+)([hl])/g))bits[n]=on==='h';
+  assert.deepEqual(bits,{9:false,1000:target.mouse==='VT200',1002:false,1003:false,1006:target.encoding==='SGR',1016:false});
+ }
+});
