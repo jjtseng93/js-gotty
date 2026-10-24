@@ -12194,6 +12194,9 @@
             this.reconnectDeadline = 0;
             this.reconnectAttempts = 0;
             this.zmodemExpectedSeq = 0;
+            this.term.onClipboard?.(data => {
+              if (!this.disconnected) this.connection.send("C" + data);
+            });
           }
           open() {
             let e;
@@ -12550,6 +12553,10 @@
               (this.kittyKeyboard = new globalThis.GoTTYKittyKeyboard.KittyKeyboard(this.term, {
                 android: /Android/i.test(navigator.userAgent),
               })),
+              this.term.parser.registerOscHandler(52, data => {
+                if (!this.disconnected && data.length <= 1048576) this.clipboardHandler?.(data);
+                return true;
+              }),
               this.term.parser.registerOscHandler(777, data => {
                 const match = /^jsgotty-modes;([a-f0-9]{32})$/.exec(data);
                 if (!match) {
@@ -12708,6 +12715,9 @@
           }
           writeTerminal(data) {
             this.enqueueTerminal(done => this.term.write(data, done));
+          }
+          onClipboard(handler) {
+            this.clipboardHandler = handler;
           }
           sessionModes() {
             const core = this.term._core;

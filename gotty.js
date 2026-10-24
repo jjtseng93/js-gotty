@@ -14,6 +14,8 @@ const { constants: fsConstants } = require("fs");
 const WebSocket = require("ws");
 const { TerminalModeTracker } = require("./terminal-modes.js");
 const { WebSocketServer } = WebSocket;
+const { ClipboardHost, handleOSC52 } = require("./clipboard.js");
+const clipboardHost = new ClipboardHost();
 
 const MSG_INPUT = "1";
 const MSG_PING = "2";
@@ -2450,6 +2452,9 @@ class PtySession {
     }
 
     switch (type) {
+      case "C":
+        handleOSC52(this, ws, payload, clipboardHost);
+        break;
       case MSG_INPUT:
         if (!this.isWriter(ws) || payload.length === 0) {
           return;

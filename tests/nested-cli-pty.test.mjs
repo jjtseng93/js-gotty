@@ -36,8 +36,9 @@ function spawnClient(url,onData){
 // Emulate the outer browser's private parser reply; the separate Chromium test
 // checks this against the real bundled xterm parser and rendering queue.
 function terminalEndpoint(parent){
- const state=tracker();Object.assign(state,structuredClone(parent));let pending='';
- return {state,data(terminal,data){
+ const state=tracker();Object.assign(state,structuredClone(parent));let pending='',output='';
+ return {state,get output(){return output;},data(terminal,data){
+  output+=data.toString('latin1');
   state.consume(data);pending+=data.toString('latin1');
   const re=/\x1b\]777;jsgotty-modes;([a-f0-9]{32})\x07/g;let m;
   while((m=re.exec(pending)))terminal.write(`\x1b]777;jsgotty-modes;${m[1]};${Buffer.from(JSON.stringify({...state.snapshot(),kittyRestore:1})).toString('base64')}\x07`);
@@ -80,6 +81,9 @@ test('real nested CLI PTYs: detach each client, preserve parents, direct fresh a
   await freshAttach(b);
   first=spawn(b.url,outer.data);await until(()=>b.socket,'middle reattach');
   await until(()=>equals(outer.state.snapshot(),c.state.snapshot()),'middle resumed state');
+  // CLI clients must forward OSC52 untouched to the actual outer emulator.
+  const osc52='\x1b]52;c;dGVzdA==\x07\x1b]52;c;?\x1b\\';
+  c.output(osc52);await until(()=>outer.output.includes(osc52),'OSC52 pass-through');
   // Real input still traverses both clients after querying/restoring.
   let received='';c.input=data=>{received+=data.toString();};
   first.terminal.write('\x1b[120;9u');await until(()=>received.includes('\x1b[120;9u'),'Super-X input through both clients');
