@@ -12544,12 +12544,19 @@
 	              })),
 	              (this.fitAddOn = new s.FitAddon()),
 	              (this.zmodemAddon = new a.ZModemAddon({
-	                toTerminal: (e) => this.term.write(e),
+	                toTerminal: (e) => this.writeTerminal(e),
 	                toServer: (e) => this.sendInput(e),
 	              })),
               (this.kittyKeyboard = new globalThis.GoTTYKittyKeyboard.KittyKeyboard(this.term, {
                 android: /Android/i.test(navigator.userAgent),
               })),
+              this.term.parser.registerOscHandler(777, data => {
+                const match = /^jsgotty-modes;([a-f0-9]{32})$/.exec(data);
+                if (!match) return false;
+                this.term.input("\x1b]777;jsgotty-modes;" + match[1] + ";" +
+                  btoa(JSON.stringify(this.sessionModes())) + "\x07", false);
+                return true;
+              }),
               this.term.attachCustomKeyEventHandler((event) =>
                 this.kittyKeyboard.handle(event) && this.handleAndroidAltKey(event),
               ),
@@ -12680,8 +12687,35 @@
           getMessage() {
             return this.message;
           }
+          enqueueTerminal(task) {
+            this.terminalTasks ||= [];
+            this.terminalTasks.push(task);
+            if (this.terminalBusy) return;
+            this.terminalBusy = true;
+            const next = () => {
+              const task = this.terminalTasks.shift();
+              if (!task) { this.terminalBusy = false; return; }
+              task(next);
+            };
+            next();
+          }
+          writeTerminal(data) {
+            this.enqueueTerminal(done => this.term.write(data, done));
+          }
+          sessionModes() {
+            const core = this.term._core;
+            return {dec: {...core.coreService.decPrivateModes},
+              mouse: core.coreMouseService.activeProtocol,
+              encoding: core.coreMouseService.activeEncoding,
+              cursorHidden: !!core.coreService.isCursorHidden,
+              alternate: this.term.buffer.active.type === "alternate",
+              kitty: JSON.parse(JSON.stringify(this.kittyKeyboard.states))};
+          }
           applySessionModes(state) {
-            if (!state || !state.dec) return;
+            this.enqueueTerminal(done => this.term.write("", () => this.restoreSessionModes(state, done)));
+          }
+          restoreSessionModes(state, done) {
+            if (!state || !state.dec) { done(); return; }
             const core = this.term._core;
             const dec = core.coreService.decPrivateModes;
             const mouse = core.coreMouseService;
@@ -12704,12 +12738,16 @@
               const modes = {SGR:1006, SGR_PIXELS:1016};
               sequence += modes[state.encoding] ? `\x1b[?${modes[state.encoding]}h` : "\x1b[?1006l";
             }
-            if (sequence) this.term.write(sequence);
+            const complete = () => {
             // Assigned rather than replayed so the push stack never doubles; the server
             // keeps every flag, so mask to the ones kitty-keyboard.js implements.
             const supported = (s) => ({flags: s.flags & 11, stack: s.stack.map((f) => f & 11)});
             if (state.kitty?.normal && state.kitty?.alternate)
               this.kittyKeyboard.states = {normal: supported(state.kitty.normal), alternate: supported(state.kitty.alternate)};
+              done();
+            };
+            if (sequence) this.term.write(sequence, complete);
+            else complete();
           }
           setDisconnected(e) {
             if (e) this.kittyKeyboard.clearHeld(false);

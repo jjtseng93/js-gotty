@@ -196,28 +196,30 @@ const DEFAULT_MODES = new TerminalModeTracker().snapshot();
 const MOUSE_PROTOCOL_MODES = { X10: 9, VT200: 1000, DRAG: 1002, ANY: 1003 };
 const MOUSE_ENCODING_MODES = { SGR: 1006, SGR_PIXELS: 1016 };
 
-// Turns off what a previous client may have left on, using only sequences that
-// are harmless on a clean terminal: no queries, nothing that moves the cursor.
-const STARTUP_RESET =
-  "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1016l\x1b[?1004l\x1b[?2004l" +
-  "\x1b[?1l\x1b>\x1b[?25h\x1b[<100u";
-
 function sameKitty(a, b) {
   return a.flags === b.flags && a.stack.length === b.stack.length &&
     a.stack.every((flags, index) => flags === b.stack[index]);
 }
 
-function kittyRebuild(state) {
-  // Popping past the bottom clears the stack and flags; then rebuild bottom-up.
-  let sequence = "\x1b[<100u";
-  if (state.stack.length === 0) {
-    return state.flags ? `${sequence}\x1b[=${state.flags};1u` : sequence;
+// Work only on the observed stack; never pop an arbitrary number of entries.
+// With a terminal that cannot report its stack, [] denotes the unseen baseline.
+function kittyTransition(from, to) {
+  if (to.flags == null) return "";
+  let common = 0;
+  while (common < from.stack.length && common < to.stack.length &&
+    from.stack[common] === to.stack[common]) common++;
+  let sequence = "";
+  let flags = from.flags;
+  const pops = from.stack.length - common;
+  if (pops) {
+    sequence += `\x1b[<${pops}u`;
+    flags = from.stack[common];
   }
-  sequence += `\x1b[=${state.stack[0]};1u`;
-  for (const flags of state.stack.slice(1)) {
-    sequence += `\x1b[>${flags}u`;
-  }
-  return `${sequence}\x1b[>${state.flags}u`;
+  const first = to.stack[common] ?? to.flags;
+  if (flags !== first) sequence += `\x1b[=${first};1u`;
+  for (let i = common; i < to.stack.length; i++)
+    sequence += `\x1b[>${to.stack[i + 1] ?? to.flags}u`;
+  return sequence;
 }
 
 // Escape sequence that moves a terminal known to be in `from` to `to`, emitting
@@ -227,17 +229,24 @@ function modeTransition(from, to = DEFAULT_MODES) {
   const fromScreen = from.alternate ? "alternate" : "normal";
   const toScreen = to.alternate ? "alternate" : "normal";
   // Kitty keyboard stacks are per screen, so each is fixed while it is active.
-  if (!sameKitty(from.kitty[fromScreen], to.kitty[fromScreen])) {
-    sequence += kittyRebuild(to.kitty[fromScreen]);
+  if (from.alternate != null && !sameKitty(from.kitty[fromScreen], to.kitty[fromScreen])) {
+    sequence += kittyTransition(from.kitty[fromScreen], to.kitty[fromScreen]);
   }
-  if (fromScreen !== toScreen) {
+  if (to.alternate != null && from.alternate !== to.alternate) {
     sequence += `\x1b[?1049${to.alternate ? "h" : "l"}`;
     if (!sameKitty(from.kitty[toScreen], to.kitty[toScreen])) {
-      sequence += kittyRebuild(to.kitty[toScreen]);
+      sequence += kittyTransition(from.kitty[toScreen], to.kitty[toScreen]);
     }
   }
+  const inactive = toScreen === "normal" ? "alternate" : "normal";
+  if (from.alternate != null && to.alternate != null && fromScreen === toScreen &&
+      !sameKitty(from.kitty[inactive], to.kitty[inactive]) && to.kitty[inactive].flags != null) {
+    sequence += `\x1b[?1047${inactive === "alternate" ? "h" : "l"}`;
+    sequence += kittyTransition(from.kitty[inactive], to.kitty[inactive]);
+    sequence += `\x1b[?1047${to.alternate ? "h" : "l"}`;
+  }
   for (const [mode, name] of Object.entries(TRACKED_DEC_FLAGS)) {
-    if (!!from.dec[name] === !!to.dec[name]) {
+    if (to.dec[name] == null || from.dec[name] === to.dec[name]) {
       continue;
     }
     if (name === "applicationKeypad") {
@@ -246,20 +255,45 @@ function modeTransition(from, to = DEFAULT_MODES) {
       sequence += `\x1b[?${mode}${to.dec[name] ? "h" : "l"}`;
     }
   }
-  if (!!from.cursorHidden !== !!to.cursorHidden) {
+  if (to.cursorHidden != null && from.cursorHidden !== to.cursorHidden) {
     sequence += `\x1b[?25${to.cursorHidden ? "l" : "h"}`;
   }
-  if (from.mouse !== to.mouse) {
+  if (to.mouse != null && from.mouse !== to.mouse) {
     sequence += MOUSE_PROTOCOL_MODES[to.mouse]
       ? `\x1b[?${MOUSE_PROTOCOL_MODES[to.mouse]}h`
-      : `\x1b[?${MOUSE_PROTOCOL_MODES[from.mouse]}l`;
+      : `\x1b[?${MOUSE_PROTOCOL_MODES[from.mouse] || 1000}l`;
   }
-  if (from.encoding !== to.encoding) {
+  if (to.encoding != null && from.encoding !== to.encoding) {
     sequence += MOUSE_ENCODING_MODES[to.encoding]
       ? `\x1b[?${MOUSE_ENCODING_MODES[to.encoding]}h`
-      : `\x1b[?${MOUSE_ENCODING_MODES[from.encoding]}l`;
+      : `\x1b[?${MOUSE_ENCODING_MODES[from.encoding] || 1006}l`;
   }
   return sequence;
 }
 
-module.exports = { TerminalModeTracker, modeTransition, STARTUP_RESET };
+function validateSnapshot(value) {
+  if (!value || !value.dec || !value.kitty) throw Error("Invalid terminal modes");
+  const result = new TerminalModeTracker().snapshot();
+  for (const key of Object.values(TRACKED_DEC_FLAGS)) {
+    if (typeof value.dec[key] !== 'boolean' && value.dec[key] !== null) throw Error("Invalid DEC mode");
+    result.dec[key] = value.dec[key];
+  }
+  for (const key of ['alternate', 'cursorHidden']) {
+    if (typeof value[key] !== 'boolean' && value[key] !== null) throw Error("Invalid screen mode");
+    result[key] = value[key];
+  }
+  for (const [key, choices] of [['mouse', ['NONE', ...Object.values(MOUSE_PROTOCOLS)]], ['encoding', ['DEFAULT', ...Object.values(MOUSE_ENCODINGS)]]]) {
+    if (value[key] !== null && !choices.includes(value[key])) throw Error("Invalid mouse mode");
+    result[key] = value[key];
+  }
+  for (const key of ['normal', 'alternate']) {
+    const state = value.kitty[key];
+    const flag = n => Number.isInteger(n) && n >= 0 && n <= KITTY_KEYBOARD_FLAGS;
+    if (!state || (state.flags !== null && !flag(state.flags)) || !Array.isArray(state.stack) ||
+      state.stack.length > 32 || !state.stack.every(n => n === null || flag(n))) throw Error("Invalid Kitty state");
+    result.kitty[key] = {flags: state.flags, stack: [...state.stack]};
+  }
+  return result;
+}
+
+module.exports = { TerminalModeTracker, modeTransition, validateSnapshot, TRACKED_DEC_FLAGS, MOUSE_PROTOCOLS, MOUSE_ENCODINGS };

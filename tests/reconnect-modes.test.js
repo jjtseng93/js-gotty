@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { TerminalModeTracker, modeTransition, STARTUP_RESET } = require('../terminal-modes.js');
+const { TerminalModeTracker, modeTransition } = require('../terminal-modes.js');
 
 const source = fs.readFileSync(path.join(__dirname, '../static/js/gotty.js'), 'utf8');
-const methods = source.slice(source.indexOf('          applySessionModes(state)'), source.indexOf('          setDisconnected(e)'));
+const methods = source.slice(source.indexOf('          enqueueTerminal(task)'), source.indexOf('          setDisconnected(e)'));
 
 function feed(tracker, ...chunks) {
   for (const chunk of chunks) tracker.consume(Buffer.from(chunk, 'latin1'));
@@ -23,7 +23,7 @@ function client({ alternate = false, dec = {}, mouse = 'NONE', encoding = 'DEFAU
     _core: { coreService: { decPrivateModes: { ...defaults, ...dec }, isCursorHidden: cursorHidden },
       coreMouseService: { activeProtocol: mouse, activeEncoding: encoding } },
     buffer: { active: { type: alternate ? 'alternate' : 'normal' } },
-    write: (s) => writes.push(s),
+    write: (s, callback) => { if (s) writes.push(s); callback?.(); },
   };
   w.kittyKeyboard = { states: { normal: { flags: 0, stack: [] }, alternate: { flags: 0, stack: [] } } };
   return { w, writes };
@@ -121,9 +121,21 @@ test('kitty flags are kept unmasked for terminals that support all of them', () 
   assert.equal(feed(new TerminalModeTracker(), '\x1b[>31u').kitty.normal.flags, 31);
 });
 
-test('startup reset clears what a killed client could leave behind without moving the cursor', () => {
-  const dirty = new TerminalModeTracker();
-  feed(dirty, '\x1b[?1h\x1b=\x1b[?2004h\x1b[?1003h\x1b[?1006h\x1b[?1004h\x1b[?25l\x1b[>1u\x1b[>11u');
-  assert.deepEqual(feed(dirty, STARTUP_RESET), new TerminalModeTracker().snapshot());
-  assert.doesNotMatch(STARTUP_RESET, /\?(6|1049)[hl]|\x1b\[\?u/);
+test('incremental Kitty restoration preserves a non-default parent stack', () => {
+  const local = new TerminalModeTracker();
+  feed(local, '\x1b[=1u\x1b[>11u');
+  const parent = local.snapshot();
+  const remote = feed(new TerminalModeTracker(), '\x1b[>3u\x1b[>9u');
+  const attach = modeTransition(parent, remote);
+  assert.doesNotMatch(attach, /<100u/);
+  assert.deepEqual(feed(local, attach), remote);
+  assert.deepEqual(feed(local, modeTransition(local.snapshot(), parent)), parent);
+});
+
+test('unknown original modes are not replaced with guessed defaults on cleanup', () => {
+  const unknown = new TerminalModeTracker().snapshot();
+  for (const key of Object.keys(unknown.dec)) unknown.dec[key] = null;
+  for (const key of ['alternate','cursorHidden','mouse','encoding']) unknown[key] = null;
+  unknown.kitty.normal.flags = unknown.kitty.alternate.flags = null;
+  assert.equal(modeTransition(feed(new TerminalModeTracker(), '\x1b[?1049h\x1b[>11u'), unknown), '');
 });

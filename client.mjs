@@ -6,7 +6,8 @@ import WebSocket from "ws";
 import { encodeKittyGraphics, syntheticKittyCursorMotion } from "./client-kitty.mjs";
 import terminalModes from "./terminal-modes.js";
 
-const { TerminalModeTracker, modeTransition, STARTUP_RESET } = terminalModes;
+const { TerminalModeTracker, modeTransition, validateSnapshot } = terminalModes;
+import { captureTerminalModes } from "./client-modes.mjs";
 
 const MSG_INPUT = "1";
 const MSG_PING = "2";
@@ -413,8 +414,7 @@ async function main() {
     return;
   }
   const args = buildArguments(options, initArguments);
-  // The local terminal starts from defaults whether it is new or was left
-  // dirty by a client that was killed, so resuming behaves the same in both.
+  const originalRawMode = !!process.stdin.isRaw;
   const localModes = new TerminalModeTracker();
   // A closed terminal surfaces as an async EIO/EPIPE, not a throw. Nobody is
   // left to read anything, and the PTY keeps its modes, so just exit.
@@ -430,9 +430,24 @@ async function main() {
     process.stdout.write(data);
     localModes.consume(Buffer.from(data));
   };
-  if (process.stdout.isTTY) {
-    process.stdout.write(STARTUP_RESET);
-  }
+  const captured = await captureTerminalModes(process.stdin, process.stdout);
+  const originalModes = captured.state;
+  Object.assign(localModes, validateSnapshot(originalModes));
+  let bufferedInput = captured.buffered;
+  let probeFlushTimer, replayingProbe = false;
+  const terminalInput = chunk => {
+    if (replayingProbe) return Buffer.from(chunk);
+    const input = captured.probe.consume(chunk);
+    clearTimeout(probeFlushTimer);
+    // A lone Escape is user input too. Never hold it indefinitely while
+    // filtering a split or late response to our startup queries.
+    if (captured.probe.pending.length) probeFlushTimer = setTimeout(() => {
+      const pending = captured.probe.flush();
+      replayingProbe = true;
+      try { process.stdin.emit("data", pending); } finally { replayingProbe = false; }
+    }, 30);
+    return input;
+  };
   writeStatus(`[gotty] connecting to\n  ${wsUrl}`);
   const ws = new WebSocket(wsUrl, "webtty");
   let pingTimer = null;
@@ -456,7 +471,8 @@ async function main() {
     if (!writable || ws.readyState !== WebSocket.OPEN) {
       return;
     }
-    ws.send(MSG_INPUT + Buffer.from(chunk).toString("base64"));
+    const input = terminalInput(chunk);
+    if (input.length) ws.send(MSG_INPUT + input.toString("base64"));
   };
 
   const handleResize = () => {
@@ -469,11 +485,11 @@ async function main() {
     cleanup();
     reportDisconnected();
     ws.close();
-    process.exit(code);
+    process.stdout.write("", () => process.exit(code));
   };
 
   const handleViewerInput = (chunk) => {
-    for (const byte of Buffer.from(chunk)) {
+    for (const byte of terminalInput(chunk)) {
       if (byte === 0x03) {
         exitClient(130);
       }
@@ -522,7 +538,8 @@ async function main() {
       return;
     }
 
-    const input = Buffer.from(chunk);
+    const input = terminalInput(chunk);
+    if (!input.length) return;
     fallbackProbe = normalizeEcho(input.toString("utf8"));
     ws.send(MSG_INPUT + input.toString("base64"));
     stopFallbackInput();
@@ -556,6 +573,10 @@ async function main() {
       setRawMode(true);
       rawEnabled = process.stdin.isTTY;
       sendResize(ws, options);
+      if (bufferedInput.length) {
+        ws.send(MSG_INPUT + bufferedInput.toString("base64"));
+        bufferedInput = Buffer.alloc(0);
+      }
       return;
     }
 
@@ -582,6 +603,7 @@ pid:
       return;
     }
     closed = true;
+    clearTimeout(probeFlushTimer);
     if (pingTimer) {
       clearInterval(pingTimer);
       pingTimer = null;
@@ -591,11 +613,11 @@ pid:
     stopViewerInput();
     if (process.stdout.isTTY) {
       try {
-        writeTerminal(modeTransition(localModes.snapshot()));
+        writeTerminal(modeTransition(localModes.snapshot(), originalModes));
       } catch {}
     }
     if (rawEnabled) {
-      setRawMode(false);
+      setRawMode(originalRawMode);
       rawEnabled = false;
     }
     process.stdin.pause();
@@ -674,7 +696,7 @@ pid:
         // Only local terminal state; the PTY keeps its modes for the next resume.
         if (process.stdout.isTTY) {
           try {
-            writeTerminal(modeTransition(localModes.snapshot(), JSON.parse(payload)));
+            writeTerminal(modeTransition(localModes.snapshot(), validateSnapshot(JSON.parse(payload))));
           } catch {}
         }
         break;
