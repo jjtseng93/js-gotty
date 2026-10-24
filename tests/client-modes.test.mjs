@@ -35,3 +35,29 @@ test('capture falls back after silence and restores stdin raw state',async()=>{
  assert.equal(input.isRaw,false);assert.equal(result.state.mouse,null);assert.equal(sent.length,2);
  assert.match(sent[0],/jsgotty-modes/);assert.match(sent[1],/\?1049\$p/);
 });
+
+for (const unsupportedFirst of [false,true]) {
+ test(`unsupported mouse modes count as inactive replies (${unsupportedFirst?'first':'last'})`,()=>{
+  const p=new ModeProbe();p.standardQuery();
+  const known='\x1b[?1000;2$y\x1b[?1002;2$y\x1b[?1003;2$y\x1b[?1006;2$y';
+  const unsupported='\x1b[?9;0$y\x1b[?1016;0$y';
+  p.consume(unsupportedFirst?unsupported+known:known+unsupported);
+  assert.equal(p.state.mouse,'NONE');assert.equal(p.state.encoding,'DEFAULT');
+  p.consume('\x1b[?7;0$y\x1b[?25;0$y\x1b[?1049;0$y');
+  assert.equal(p.state.dec.wraparound,null);assert.equal(p.state.cursorHidden,null);assert.equal(p.state.alternate,null);
+  const local=new TerminalModeTracker();Object.assign(local,structuredClone(p.state));
+  local.consume(Buffer.from('\x1b[?1003h\x1b[?1006h'));
+  const cleanup=modes.modeTransition(local.snapshot(),p.state);
+  assert.ok(cleanup.includes('\x1b[?1003l'));assert.ok(cleanup.includes('\x1b[?1006l'));
+  local.consume(Buffer.from(cleanup));assert.equal(local.mouse,'NONE');assert.equal(local.encoding,'DEFAULT');
+ });
+}
+test('unsupported replies do not override active modes or fill unanswered fields',()=>{
+ const p=new ModeProbe();p.standardQuery();
+ p.consume('\x1b[?9;0$y\x1b[?1016;0$y');
+ assert.equal(p.state.mouse,null);assert.equal(p.state.encoding,null);
+ p.consume('\x1b[?1002;1$y\x1b[?1006;1$y');
+ assert.equal(p.state.mouse,'DRAG');assert.equal(p.state.encoding,'SGR');
+ p.consume('\x1b[?1000;0$y\x1b[?1003;0$y');
+ assert.equal(p.state.mouse,'DRAG');
+});

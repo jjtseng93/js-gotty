@@ -28,11 +28,14 @@ export class ModeProbe {
   reply(mode, value) {
     if (this.complete) return;
     const yes = value === 1 || value === 3;
-    if (value === 0) return;
+    // An unsupported mode cannot be active, but unlike silence it is a reply.
+    // Still aggregate below when 0 is the last answer in a mouse-mode group.
     this.replies.set(mode, yes);
-    if (TRACKED_DEC_FLAGS[mode]) this.state.dec[TRACKED_DEC_FLAGS[mode]] = yes;
-    else if (mode === 25) this.state.cursorHidden = !yes;
-    else if (mode === 1049) this.state.alternate = yes;
+    if (value !== 0) {
+      if (TRACKED_DEC_FLAGS[mode]) this.state.dec[TRACKED_DEC_FLAGS[mode]] = yes;
+      else if (mode === 25) this.state.cursorHidden = !yes;
+      else if (mode === 1049) this.state.alternate = yes;
+    }
     for (const [name, table, fallback] of [['mouse',MOUSE_PROTOCOLS,'NONE'],['encoding',MOUSE_ENCODINGS,'DEFAULT']]) {
       const active = Object.keys(table).find(key => this.replies.get(+key) === true);
       if (active) this.state[name] = table[active];
