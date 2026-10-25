@@ -34,13 +34,21 @@ test('shipped xterm reports horizontal, vertical and diagonal wheel events', {sk
    const screen=term.element.querySelector('.xterm-screen'), rect=screen.getBoundingClientRect();
    const wheel=(deltaX,deltaY,mods={})=>{
     sent.length=0;
-    screen.dispatchEvent(new WheelEvent('wheel',{clientX:rect.left+20,clientY:rect.top+20,deltaX,deltaY,deltaMode:1,bubbles:true,cancelable:true,...mods}));
+    const event=new WheelEvent('wheel',{clientX:rect.left+20,clientY:rect.top+20,deltaX,deltaY,deltaMode:1,bubbles:true,cancelable:true,...mods});
+    screen.dispatchEvent(event);
+    if(term._core.coreMouseService.areMouseEventsActive&&!event.defaultPrevented)throw Error('Wheel default was not prevented');
     return sent.map(s=>Number(s.match(/<([0-9]+);/)[1]));
    };
    equal(wheel(-1,0),[66]);equal(wheel(1,0),[67]);
+   equal(wheel(0,-1,{shiftKey:true}),[68]);equal(wheel(0,1,{shiftKey:true}),[69]);
    equal(wheel(0,-1),[64]);equal(wheel(0,1),[65]);
    equal(wheel(1,-1),[67,64]);
    equal(wheel(-1,0,{shiftKey:true,altKey:true,ctrlKey:true}),[94]);
+   for(let bits=0;bits<8;bits++) {
+    const mods={shiftKey:!!(bits&1),altKey:!!(bits&2),ctrlKey:!!(bits&4)};
+    for(const [dx,dy,code] of [[0,-1,64],[0,1,65],[-1,0,66],[1,0,67]])
+     equal(wheel(dx,dy,mods),[code+(bits<<2)]);
+   }
    await write('\\x1b[?1002l');equal(wheel(1,0),[]);
    wrapper.close();return 'ok';
   })()`});
